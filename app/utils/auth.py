@@ -8,6 +8,8 @@ from app.db.connection import db
 from bson import ObjectId
 import os
 from dotenv import load_dotenv
+from fastapi import HTTPException
+from app.utils.constants import ALLOWED_ROLES
 
 load_dotenv()
 
@@ -18,6 +20,14 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
+def validate_role(role: str):
+    """Ensure only allowed roles are used."""
+    if role not in ALLOWED_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid role '{role}'. Allowed roles are: {', '.join(ALLOWED_ROLES)}"
+        )
+    
 def hash_password(password: str) -> str:
     if not password:
         raise ValueError("Password cannot be empty")
@@ -38,29 +48,35 @@ def create_access_token(data: dict):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid token or expired token",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-
-    user = await db.users.find_one({"_id": ObjectId(user_id)})
-    if user is None:
-        raise credentials_exception
-    user["id"] = str(user["_id"])
-    return user
-
 def require_roles(*roles):
     async def wrapper(user=Depends(get_current_user)):
         if user["role"] not in roles:
             raise HTTPException(status_code=403, detail="Access denied")
         return user
     return wrapper
+
+token_blacklist = set()
+
+def blacklist_token(token: str):
+    token_blacklist.add(token)
+
+def is_token_blacklisted(token: str):
+    return token in token_blacklist
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    if is_token_blacklisted(token):
+        raise HTTPException(status_code=401, detail="Token has been revoked. Please log in again.")
+
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    return await db.users.find_one({"_id": ObjectId(user_id)})
