@@ -40,17 +40,33 @@ async def register_user(data: dict):
 
 @router.post("/login")
 async def common_login(data: dict):
-    username = data.get("username")
+    print("Login data received:", data)
+
+    username_or_email = data.get("username") or data.get("email")
     password = data.get("password")
 
-    # 1️⃣ Try SuperAdmin
-    user = await db.users.find_one({"username": username})
-    if user and verify_password(password, user["password"]):
+    if not username_or_email or not password:
+        raise HTTPException(status_code=400, detail="Username/Email and password required")
+
+    print("Attempting login for:", username_or_email)
+
+    # 🔍 Try SuperAdmin
+    user = await db.users.find_one({
+        "$or": [
+            {"name": username_or_email},
+            {"email": username_or_email}
+        ]
+    })
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user["role"] == "superadmin" and verify_password(password, user["password"]):
         token = create_access_token({"sub": str(user["_id"]), "role": "superadmin"})
         return {"access_token": token, "role": "superadmin"}
 
     # 2️⃣ Try Company
-    company = await db.companies.find_one({"username": username})
+    company = await db.companies.find_one({"username": username_or_email})
     if company and verify_password(password, company["password"]):
         if company.get("status") != "active":
             raise HTTPException(status_code=403, detail="Company account inactive")
@@ -58,7 +74,7 @@ async def common_login(data: dict):
         return {"access_token": token, "role": "company"}
 
     # 3️⃣ Try Customer
-    customer = await db.customers.find_one({"username": username})
+    customer = await db.customers.find_one({"username": username_or_email})
     if customer and verify_password(password, customer["password"]):
         if customer.get("status") != "active":
             raise HTTPException(status_code=403, detail="Customer account inactive")
@@ -73,13 +89,14 @@ async def logout_user(token: str = Depends(oauth2_scheme)):
     blacklist_token(token)
     return {"message": "Successfully logged out!"}
 
-@router.get("/me")
+@router.get("/profile")
 async def get_profile(user=Depends(get_current_user)):
+    # print("Fetching profile for user:", user)
     role = user.get("role")
     if role == "superadmin":
         return {
             "role": "superadmin",
-            "username": user["username"],
+            "username": user["name"],
             "email": user["email"]
         }
 
