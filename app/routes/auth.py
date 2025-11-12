@@ -73,7 +73,7 @@ async def logout_user(token: str = Depends(oauth2_scheme)):
     blacklist_token(token)
     return {"message": "Successfully logged out!"}
 
-@router.get("/me")
+@router.get("/profile")
 async def get_profile(user=Depends(get_current_user)):
     role = user.get("role")
     if role == "superadmin":
