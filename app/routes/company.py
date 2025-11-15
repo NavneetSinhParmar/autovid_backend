@@ -9,60 +9,153 @@ router = APIRouter(prefix="/company", tags=["Company Management"])
 # 🟢 Create Company (SuperAdmin)
 @router.post("/")
 async def create_company(data: dict, user=Depends(require_roles("superadmin"))):
-    # check duplicate username/email
-    if await db.companies.find_one({"username": data["username"]}):
+
+    # ---- STEP 1: Check if user already exists ----
+    if await db.users.find_one({"username": data["username"]}):
         raise HTTPException(status_code=400, detail="Username already exists")
-    if await db.companies.find_one({"email": data["email"]}):
+
+    if await db.users.find_one({"email": data["email"]}):
         raise HTTPException(status_code=400, detail="Email already exists")
 
-    company_doc = {
-        "company_name": data["company_name"],
-        "email": data["email"],
-        "mobile": data["mobile"],
-        "description": data.get("description"),
-        "logo_url": data.get("logo_url"),
+    # ---- STEP 2: Create User Entry ----
+    user_doc = {
         "username": data["username"],
+        "email": data["email"],
         "password": hash_password(data["password"]),
+        "role": "company",
         "status": "active",
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
     }
-    result = await db.companies.insert_one(company_doc)
-    return {"message": "Company created successfully", "id": str(result.inserted_id)}
+    user_result = await db.users.insert_one(user_doc)
+    user_id = str(user_result.inserted_id)
+
+    # ---- STEP 3: Create Company Entry ----
+    company_doc = {
+        "company_name": data["company_name"],
+        "description": data.get("description"),
+        "mobile": data["mobile"],
+        "logo_url": data.get("logo_url"),
+        "user_id": user_id,                    # FOREIGN KEY
+        "status": "active",
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+    }
+
+    company_result = await db.companies.insert_one(company_doc)
+
+    return {
+        "message": "Company created successfully",
+        "company_id": str(company_result.inserted_id),
+        "user_id": user_id
+    }
+
 
 # 🔵 Get all companies
 @router.get("/")
 async def list_companies(user=Depends(require_roles("superadmin"))):
     companies = []
+
     async for c in db.companies.find():
-        c["id"] = str(c["_id"])
-        del c["_id"], c["password"]
+
+        # fix company id
+        c["company_id"] = str(c["_id"])
+        c.pop("_id", None)
+
+        # join user
+        user_data = await db.users.find_one(
+            {"_id": ObjectId(c["user_id"])},
+            {"password": 0}
+        )
+
+        if user_data:
+            # convert user fields
+            user_data["user_id"] = str(user_data["_id"])
+            user_data.pop("_id", None)
+
+            # DO NOT MERGE DIRECTLY (this overrides ids)
+            # Instead rename and add
+            c["username"] = user_data["username"]
+            c["email"] = user_data["email"]
+            c["role"] = user_data["role"]
+            c["user_status"] = user_data["status"]
+            c["user_created_at"] = user_data["created_at"]
+            c["user_updated_at"] = user_data["updated_at"]
+
         companies.append(c)
+
     return companies
+
 
 # 🟠 Get single company
 @router.get("/{company_id}")
-async def get_company(company_id: str, user=Depends(require_roles("superadmin"))):
-    company = await db.companies.find_one({"_id": ObjectId(company_id)})
-    if not company:
-        raise HTTPException(status_code=404, detail="Company not found")
-    company["id"] = str(company["_id"])
-    del company["_id"], company["password"]
-    return company
+@router.get("/")
+async def list_companies(user=Depends(require_roles("superadmin"))):
+    companies = []
+
+    async for c in db.companies.find():
+
+        # Convert company ID
+        company_id = str(c["_id"])
+        c["id"] = company_id
+        c.pop("_id", None)
+
+        # Fetch user
+        user_data = await db.users.find_one(
+            {"_id": ObjectId(c["user_id"])},
+            {"password": 0}
+        )
+
+        # Merge user fields at root level without overriding company data
+        if user_data:
+            c["user_id"] = str(user_data["_id"])
+            c["username"] = user_data["username"]
+            c["email"] = user_data["email"]
+            c["role"] = user_data["role"]
+
+            # optionally add these:
+            c["user_status"] = user_data["status"]
+            c["user_created_at"] = user_data["created_at"]
+            c["user_updated_at"] = user_data["updated_at"]
+
+        companies.append(c)
+
+    return companies
+
 
 # 🟣 Update company
 @router.patch("/{company_id}")
 async def update_company(company_id: str, data: dict, user=Depends(require_roles("superadmin"))):
+
+    # Prevent updating user_id manually
+    if "user_id" in data:
+        del data["user_id"]
+
     data["updated_at"] = datetime.utcnow()
-    result = await db.companies.update_one({"_id": ObjectId(company_id)}, {"$set": data})
-    if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Company not found or not updated")
+
+    result = await db.companies.update_one(
+        {"_id": ObjectId(company_id)},
+        {"$set": data}
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Company not found")
+
     return {"message": "Company updated successfully"}
 
-# 🔴 Delete company
+
+# 🔴 Delete company (also delete linked user)
 @router.delete("/{company_id}")
 async def delete_company(company_id: str, user=Depends(require_roles("superadmin"))):
-    result = await db.companies.delete_one({"_id": ObjectId(company_id)})
-    if result.deleted_count == 0:
+
+    company = await db.companies.find_one({"_id": ObjectId(company_id)})
+    if not company:
         raise HTTPException(status_code=404, detail="Company not found")
-    return {"message": "Company deleted successfully"}
+
+    # Delete company entry
+    await db.companies.delete_one({"_id": ObjectId(company_id)})
+
+    # Delete linked user
+    await db.users.delete_one({"_id": ObjectId(company["user_id"])})
+
+    return {"message": "Company and linked user deleted successfully"}
