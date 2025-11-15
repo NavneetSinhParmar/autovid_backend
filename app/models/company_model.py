@@ -2,24 +2,22 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional
 from datetime import datetime
 
-class CompanyBase(BaseModel):
+class CompanyCreate(BaseModel):
     company_name: str
-    email: EmailStr
-    mobile: str
     description: Optional[str] = None
+    mobile: str
     logo_url: Optional[str] = None
-    username: str
-    password: str
+    user_id: str                     # FK to User table
     status: Optional[str] = "active"
+
 
 class CompanyOut(BaseModel):
     id: str
     company_name: str
-    email: str
-    mobile: str
     description: Optional[str]
+    mobile: str
     logo_url: Optional[str]
-    username: str
+    user_id: str
     status: str
     created_at: datetime
     updated_at: datetime

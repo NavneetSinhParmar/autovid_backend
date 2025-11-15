@@ -2,16 +2,16 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional
 
 class UserCreate(BaseModel):
-    name: str
+    username: str
     email: EmailStr
     password: str
-    role: Optional[str] = "customer"
-    company_id: Optional[str] = None
-    status: Optional[str] = "active"   # 👈 added
+    role: Optional[str] = "customer"   # superadmin / company / customer
+    status: Optional[str] = "active"
+
 
 class UserOut(BaseModel):
     id: str
-    name: str
+    username: str
     email: EmailStr
     role: str
     status: str
