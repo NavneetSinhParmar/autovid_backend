@@ -1,0 +1,80 @@
+# --------------------
+# Python cache files
+# --------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.env/
+.venv/
+
+# Environment variables
+*.env
+.env.*
+
+# FastAPI / Uvicorn logs
+*.log
+
+# VSCode settings
+.vscode/
+*.code-workspace
+
+# Byte-compiled
+*.pyo
+*.pyd
+*.pdb
+
+# mypy / pyright
+.mypy_cache/
+.pyright/
+
+# Pytest
+.pytest_cache/
+
+# Coverage files
+htmlcov/
+.coverage
+.coverage.*
+.cache
+
+# Pydantic compiled
+*.msgspec
+*.pydantic
+
+# Jupyter
+.ipynb_checkpoints
+
+# Build artefacts
+build/
+dist/
+*.egg-info/
+
+# Compiled wheels
+*.whl
+
+# Docker
+docker_data/
+docker-compose.override.yml
+
+# Node (if using frontend inside backend project)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE-specific junk
+.idea/
+*.iml
+
+# Uploaded media (optional)
+media/
+uploads/
+
+# Local configs
+config.local.*
+settings.local.*
