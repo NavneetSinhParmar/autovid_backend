@@ -10,7 +10,7 @@ router = APIRouter(prefix="/customer", tags=["Customer Management"])
 # 🟢 CREATE CUSTOMER (Admin or Company)
 @router.post("/")
 async def create_customer(data: dict, user=Depends(require_roles("superadmin", "company"))):
-
+    print("This is for cistomer rellated APIs debugging only")
     # Check duplicate username / email
     if await db.users.find_one({"username": data["username"]}):
         raise HTTPException(status_code=400, detail="Username already exists")
