@@ -97,7 +97,9 @@ async def get_profile(user=Depends(get_current_user)):
         }
 
     elif role == "company":
+        print("inside Company")
         company = await db.companies.find_one({"_id": ObjectId(user["_id"])})
+        print("if Company",company)
         if company:
             return {
                 "role": "company",
