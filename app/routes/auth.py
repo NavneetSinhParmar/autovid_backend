@@ -87,35 +87,46 @@ async def logout_user(token: str = Depends(oauth2_scheme)):
 
 @router.get("/profile")
 async def get_profile(user=Depends(get_current_user)):
-    # print("Fetching profile for user:", user)
+
     role = user.get("role")
+    user_id = str(user["_id"])    # convert to string for company / customer lookups
+
     if role == "superadmin":
         return {
             "role": "superadmin",
-            "username": user["name"],
+            "username": user["username"],
             "email": user["email"]
         }
 
     elif role == "company":
-        company = await db.companies.find_one({"_id": ObjectId(user["_id"])})
+        company = await db.companies.find_one({"user_id": user_id})
         if company:
+            company["id"] = str(company["_id"])
             return {
                 "role": "company",
+                "id": company["id"],
                 "company_name": company["company_name"],
-                "email": company["email"],
+                "email": user["email"],      # email from users table
                 "mobile": company["mobile"],
-                "status": company["status"]
+                "status": company["status"],
+                "logo_url": company.get("logo_url")
             }
+        raise HTTPException(status_code=404, detail="Company profile not found")
 
     elif role == "customer":
-        customer = await db.customers.find_one({"_id": ObjectId(user["_id"])})
+        customer = await db.customers.find_one({"user_id": user_id})
         if customer:
+            customer["id"] = str(customer["_id"])
             return {
                 "role": "customer",
-                "name": customer["name"],
-                "email": customer["email"],
-                "company_id": customer["linked_company_id"]
+                "id": customer["id"],
+                "full_name": customer["full_name"],
+                "email": user["email"],
+                "city": customer.get("city"),
+                "phone_number": customer.get("phone_number"),
+                "linked_company_id": customer.get("linked_company_id")
             }
+        raise HTTPException(status_code=404, detail="Customer profile not found")
 
     raise HTTPException(status_code=404, detail="User not found")
 
