@@ -10,15 +10,41 @@ router = APIRouter(prefix="/customer", tags=["Customer Management"])
 # 🟢 CREATE CUSTOMER (Admin or Company)
 @router.post("/")
 async def create_customer(data: dict, user=Depends(require_roles("superadmin", "company"))):
-    print("This is for cistomer rellated APIs debugging only")
-    # Check duplicate username / email
+    # -------------------------------------------------------
+    # 1️⃣ If logged-in user is COMPANY → auto fetch COMPANY ID
+    # -------------------------------------------------------
+    if user["role"] == "company":        
+        print("current user id is",user["_id"])
+        # company = await db.companies.find_one({"user_id": user["_id"]})
+        company = await db.companies.find_one({"user_id": str(user["_id"])})
+
+        print("company user id in db is 691969c7cd4fe930f3b0f81f",company)
+        if not company:
+            raise HTTPException(status_code=404, detail="Company record not found for this user")
+
+        # store real company_id (not user_id)
+        data["linked_company_id"] = str(company["_id"])
+        print("AUTO SET company_id =", data["linked_company_id"])
+
+    # -------------------------------------------------------
+    # 2️⃣ If SUPERADMIN → linked_company_id must be provided
+    # -------------------------------------------------------
+    if user["role"] == "superadmin":
+        if "linked_company_id" not in data:
+            raise HTTPException(status_code=400, detail="linked_company_id is required for superadmin")
+
+    # -------------------------------------------------------
+    # 3️⃣ Check duplicate username/email
+    # -------------------------------------------------------
     if await db.users.find_one({"username": data["username"]}):
         raise HTTPException(status_code=400, detail="Username already exists")
 
     if await db.users.find_one({"email": data["email"]}):
         raise HTTPException(status_code=400, detail="Email already exists")
 
-    # ---- STEP 1: Create USER entry ----
+    # -------------------------------------------------------
+    # 4️⃣ Create USER entry
+    # -------------------------------------------------------
     user_doc = {
         "username": data["username"],
         "email": data["email"],
@@ -32,7 +58,17 @@ async def create_customer(data: dict, user=Depends(require_roles("superadmin", "
     user_result = await db.users.insert_one(user_doc)
     user_id = str(user_result.inserted_id)
 
-    # ---- STEP 2: Create CUSTOMER entry ----
+    # -------------------------------------------------------
+    # 5️⃣ Convert linked_company_id to ObjectId
+    # -------------------------------------------------------
+    try:
+        linked_company_oid = ObjectId(data["linked_company_id"])
+    except:
+        raise HTTPException(status_code=400, detail="Invalid linked_company_id")
+
+    # -------------------------------------------------------
+    # 6️⃣ Create CUSTOMER entry
+    # -------------------------------------------------------
     customer_doc = {
         "customer_company_name": data.get("customer_company_name"),
         "full_name": data["full_name"],
@@ -43,22 +79,21 @@ async def create_customer(data: dict, user=Depends(require_roles("superadmin", "
         "address": data.get("address"),
 
         # relationships
-        "linked_company_id": data.get("linked_company_id"),
-        "user_id": user_id,
+        "linked_company_id": linked_company_oid,  # FIXED → real company_id
+        "user_id": ObjectId(user_id),
 
         "status": "active",
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
     }
 
-    customer_result = await db.customers.insert_one(customer_doc)
+    result = await db.customers.insert_one(customer_doc)
 
     return {
         "message": "Customer created successfully",
-        "customer_id": str(customer_result.inserted_id),
+        "customer_id": str(result.inserted_id),
         "user_id": user_id
     }
-
 
 # 🔵 LIST CUSTOMERS (WITH JOIN: USER + COMPANY)
 @router.get("/")
@@ -88,14 +123,25 @@ async def list_customers(user=Depends(require_roles("superadmin", "company"))):
     customers = []
 
     async for doc in db.customers.aggregate(pipeline):
-        # Format IDs
+
+        # Convert main customer ID
         doc["id"] = str(doc["_id"])
         del doc["_id"]
 
+        # Convert customer.user_id (this is ObjectId)
+        if isinstance(doc["user_id"], ObjectId):
+            doc["user_id"] = str(doc["user_id"])
+
+        # Convert linked_company_id (if exists)
+        if doc.get("linked_company_id") and isinstance(doc["linked_company_id"], ObjectId):
+            doc["linked_company_id"] = str(doc["linked_company_id"])
+
+        # Convert embedded user
         doc["user"]["id"] = str(doc["user"]["_id"])
         del doc["user"]["_id"]
-        del doc["user"]["password"]  # never return password
+        del doc["user"]["password"]
 
+        # Convert embedded company
         if doc.get("company"):
             doc["company"]["id"] = str(doc["company"]["_id"])
             del doc["company"]["_id"]
