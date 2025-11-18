@@ -39,7 +39,7 @@ async def create_super_admin():
     existing = await db.users.find_one({"role": "superadmin"})
     if not existing:
         superadmin_data = {
-            "name": "Super Admin",
+            "username": "Super Admin",
             "email": "superadmin@autovid.com",
             "password": hash_password("Admin@123"),
             "role": "superadmin"
