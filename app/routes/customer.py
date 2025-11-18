@@ -208,11 +208,13 @@ async def update_customer(customer_id: str, data: dict, user=Depends(require_rol
         del data["user_id"]
 
     result = await db.customers.update_one(
-        {"_id": ObjectId(customer_id)},
+        {"id": ObjectId(id)},
+        {"user_id": ObjectId(customer_id)},
+        {"username": ObjectId(user)},
         {"$set": data}
     )
 
-    if result.matched_count == 0:
+    if result:
         raise HTTPException(status_code=404, detail="Customer not found")
 
     return {"message": "Customer updated successfully"}
