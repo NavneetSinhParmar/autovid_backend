@@ -1,50 +1,52 @@
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime
 from bson import ObjectId
+from typing import Union, List, Dict, Any
+
 from app.db.connection import db
 from app.utils.auth import require_roles, hash_password
+from app.models.customer_model import CustomerCreate, CustomerOut
 
 router = APIRouter(prefix="/customer", tags=["Customer Management"])
 
+# --------------------------------------------------------
+# 🟢 Helper: Convert string → ObjectId with safe handling
+# --------------------------------------------------------
+def to_oid(value: str):
+    try:
+        return ObjectId(value)
+    except:
+        raise HTTPException(status_code=400, detail=f"Invalid ObjectId: {value}")
 
-# 🟢 CREATE CUSTOMER (Admin or Company)
-@router.post("/")
-async def create_customer(data: dict, user=Depends(require_roles("superadmin", "company"))):
-    # -------------------------------------------------------
-    # 1️⃣ If logged-in user is COMPANY → auto fetch COMPANY ID
-    # -------------------------------------------------------
-    if user["role"] == "company":        
-        print("current user id is",user["_id"])
-        # company = await db.companies.find_one({"user_id": user["_id"]})
+# --------------------------------------------------------
+# 🟢 Helper: Validate and Create Customer Document
+# --------------------------------------------------------
+async def create_single_customer(data: Dict[str, Any], user: Dict):
+
+    # 1️⃣ If logged user is COMPANY → auto set linked_company_id
+    if user["role"] == "company":
         company = await db.companies.find_one({"user_id": str(user["_id"])})
 
-        print("company user id in db is 691969c7cd4fe930f3b0f81f",company)
         if not company:
-            raise HTTPException(status_code=404, detail="Company record not found for this user")
+            raise HTTPException(status_code=404,
+                                detail="Company record not found for this user")
+        
+        data["linked_company_id"] = str(company["_id"])  # override automatically
 
-        # store real company_id (not user_id)
-        data["linked_company_id"] = str(company["_id"])
-        print("AUTO SET company_id =", data["linked_company_id"])
-
-    # -------------------------------------------------------
-    # 2️⃣ If SUPERADMIN → linked_company_id must be provided
-    # -------------------------------------------------------
-    if user["role"] == "superadmin":
+    # 2️⃣ SUPERADMIN must give linked_company_id
+    elif user["role"] == "superadmin":
         if "linked_company_id" not in data:
-            raise HTTPException(status_code=400, detail="linked_company_id is required for superadmin")
+            raise HTTPException(status_code=400,
+                                detail="linked_company_id is required for superadmin")
 
-    # -------------------------------------------------------
-    # 3️⃣ Check duplicate username/email
-    # -------------------------------------------------------
+    # 3️⃣ Check Duplicate User
     if await db.users.find_one({"username": data["username"]}):
         raise HTTPException(status_code=400, detail="Username already exists")
 
     if await db.users.find_one({"email": data["email"]}):
         raise HTTPException(status_code=400, detail="Email already exists")
 
-    # -------------------------------------------------------
-    # 4️⃣ Create USER entry
-    # -------------------------------------------------------
+    # 4️⃣ Create User Record
     user_doc = {
         "username": data["username"],
         "email": data["email"],
@@ -55,20 +57,10 @@ async def create_customer(data: dict, user=Depends(require_roles("superadmin", "
         "updated_at": datetime.utcnow(),
     }
 
-    user_result = await db.users.insert_one(user_doc)
-    user_id = str(user_result.inserted_id)
+    inserted_user = await db.users.insert_one(user_doc)
+    user_id = str(inserted_user.inserted_id)
 
-    # -------------------------------------------------------
-    # 5️⃣ Convert linked_company_id to ObjectId
-    # -------------------------------------------------------
-    try:
-        linked_company_oid = ObjectId(data["linked_company_id"])
-    except:
-        raise HTTPException(status_code=400, detail="Invalid linked_company_id")
-
-    # -------------------------------------------------------
-    # 6️⃣ Create CUSTOMER entry
-    # -------------------------------------------------------
+    # 5️⃣ Prepare Customer Record
     customer_doc = {
         "customer_company_name": data.get("customer_company_name"),
         "full_name": data["full_name"],
@@ -78,24 +70,56 @@ async def create_customer(data: dict, user=Depends(require_roles("superadmin", "
         "telephone_number": data.get("telephone_number"),
         "address": data.get("address"),
 
-        # relationships
-        "linked_company_id": linked_company_oid,  # FIXED → real company_id
-        "user_id": ObjectId(user_id),
+        "linked_company_id": to_oid(data["linked_company_id"]),
+        "user_id": to_oid(user_id),
 
         "status": "active",
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
     }
 
-    result = await db.customers.insert_one(customer_doc)
+    inserted = await db.customers.insert_one(customer_doc)
 
     return {
         "message": "Customer created successfully",
-        "customer_id": str(result.inserted_id),
-        "user_id": user_id
+        "customer_id": str(inserted.inserted_id),
+        "user_id": user_id,
     }
 
-# 🔵 LIST CUSTOMERS (WITH JOIN: USER + COMPANY)
+# --------------------------------------------------------
+# 🟢 CREATE CUSTOMER (Single / Bulk)
+# --------------------------------------------------------
+@router.post("/")
+async def create_customer_handler(
+    data: Union[Dict, List[Dict]],
+    user=Depends(require_roles("superadmin", "company"))
+):
+
+    # 🔵 Bulk Creation
+    if isinstance(data, list):
+        if not data:
+            raise HTTPException(status_code=400, detail="Input list cannot be empty")
+
+        results = []
+        for item in data:
+            try:
+                result = await create_single_customer(item, user)
+                results.append({"success": True, "data": result})
+            except HTTPException as e:
+                results.append({"success": False, "error": e.detail, "data": item})
+
+        return {
+            "message": "Bulk creation completed",
+            "total": len(data),
+            "results": results,
+        }
+
+    # 🔵 Single Creation
+    return await create_single_customer(data, user)
+
+# --------------------------------------------------------
+# 🔵 LIST CUSTOMERS WITH USER + COMPANY JOIN
+# --------------------------------------------------------
 @router.get("/")
 async def list_customers(user=Depends(require_roles("superadmin", "company"))):
 
@@ -105,7 +129,7 @@ async def list_customers(user=Depends(require_roles("superadmin", "company"))):
                 "from": "users",
                 "localField": "user_id",
                 "foreignField": "_id",
-                "as": "user"
+                "as": "user",
             }
         },
         {"$unwind": "$user"},
@@ -114,49 +138,38 @@ async def list_customers(user=Depends(require_roles("superadmin", "company"))):
                 "from": "companies",
                 "localField": "linked_company_id",
                 "foreignField": "_id",
-                "as": "company"
+                "as": "company",
             }
         },
         {"$unwind": {"path": "$company", "preserveNullAndEmptyArrays": True}},
     ]
 
-    customers = []
-
+    data = []
     async for doc in db.customers.aggregate(pipeline):
 
-        # Convert main customer ID
-        doc["id"] = str(doc["_id"])
-        del doc["_id"]
+        # Convert ObjectIds
+        doc["id"] = str(doc.pop("_id"))
+        doc["user_id"] = str(doc["user_id"])
+        doc["linked_company_id"] = str(doc["linked_company_id"])
 
-        # Convert customer.user_id (this is ObjectId)
-        if isinstance(doc["user_id"], ObjectId):
-            doc["user_id"] = str(doc["user_id"])
+        doc["user"]["id"] = str(doc["user"].pop("_id"))
+        doc["user"].pop("password")
 
-        # Convert linked_company_id (if exists)
-        if doc.get("linked_company_id") and isinstance(doc["linked_company_id"], ObjectId):
-            doc["linked_company_id"] = str(doc["linked_company_id"])
-
-        # Convert embedded user
-        doc["user"]["id"] = str(doc["user"]["_id"])
-        del doc["user"]["_id"]
-        del doc["user"]["password"]
-
-        # Convert embedded company
         if doc.get("company"):
-            doc["company"]["id"] = str(doc["company"]["_id"])
-            del doc["company"]["_id"]
+            doc["company"]["id"] = str(doc["company"].pop("_id"))
 
-        customers.append(doc)
+        data.append(doc)
 
-    return customers
+    return data
 
-
-# 🟠 GET SINGLE CUSTOMER (JOIN: USER + COMPANY)
+# --------------------------------------------------------
+# 🔵 GET SINGLE CUSTOMER
+# --------------------------------------------------------
 @router.get("/{customer_id}")
 async def get_customer(customer_id: str, user=Depends(require_roles("superadmin", "company"))):
 
     pipeline = [
-        {"$match": {"_id": ObjectId(customer_id)}},
+        {"$match": {"_id": to_oid(customer_id)}},
         {
             "$lookup": {
                 "from": "users",
@@ -171,7 +184,7 @@ async def get_customer(customer_id: str, user=Depends(require_roles("superadmin"
                 "from": "companies",
                 "localField": "linked_company_id",
                 "foreignField": "_id",
-                "as": "company"
+                "as": "company",
             }
         },
         {"$unwind": {"path": "$company", "preserveNullAndEmptyArrays": True}},
@@ -183,55 +196,51 @@ async def get_customer(customer_id: str, user=Depends(require_roles("superadmin"
 
     doc = result[0]
 
-    doc["id"] = str(doc["_id"])
-    del doc["_id"]
+    doc["id"] = str(doc.pop("_id"))
+    doc["user_id"] = str(doc["user_id"])
+    doc["linked_company_id"] = str(doc["linked_company_id"])
 
-    doc["user"]["id"] = str(doc["user"]["_id"])
-    del doc["user"]["_id"]
-    del doc["user"]["password"]
+    doc["user"]["id"] = str(doc["user"].pop("_id"))
+    doc["user"].pop("password")
 
     if doc.get("company"):
-        doc["company"]["id"] = str(doc["company"]["_id"])
-        del doc["company"]["_id"]
+        doc["company"]["id"] = str(doc["company"].pop("_id"))
 
     return doc
 
-
-# 🟣 UPDATE CUSTOMER
+# --------------------------------------------------------
+# 🟠 UPDATE CUSTOMER
+# --------------------------------------------------------
 @router.patch("/{customer_id}")
-async def update_customer(customer_id: str, data: dict, user=Depends(require_roles("superadmin", "company"))):
+async def update_customer(customer_id: str, data: Dict, 
+                          user=Depends(require_roles("superadmin", "company"))):
 
     data["updated_at"] = datetime.utcnow()
 
-    # Prevent changing user_id directly
-    if "user_id" in data:
-        del data["user_id"]
+    # Can't manually change user_id
+    data.pop("user_id", None)
 
     result = await db.customers.update_one(
-        {"id": ObjectId(id)},
-        {"user_id": ObjectId(customer_id)},
-        {"username": ObjectId(user)},
-        {"$set": data}
+        {"_id": to_oid(customer_id)},
+        {"$set": data},
     )
 
-    if result:
+    if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Customer not found")
 
     return {"message": "Customer updated successfully"}
 
-
-# 🔴 DELETE CUSTOMER (ALSO DELETE LINKED USER)
+# --------------------------------------------------------
+# 🔴 DELETE CUSTOMER + LINKED USER
+# --------------------------------------------------------
 @router.delete("/{customer_id}")
 async def delete_customer(customer_id: str, user=Depends(require_roles("superadmin", "company"))):
 
-    customer = await db.customers.find_one({"_id": ObjectId(customer_id)})
+    customer = await db.customers.find_one({"_id": to_oid(customer_id)})
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    # Delete customer
-    await db.customers.delete_one({"_id": ObjectId(customer_id)})
-
-    # Delete linked User
-    await db.users.delete_one({"_id": ObjectId(customer["user_id"])})
+    await db.customers.delete_one({"_id": to_oid(customer_id)})
+    await db.users.delete_one({"_id": customer["user_id"]})
 
     return {"message": "Customer and linked user deleted successfully"}
