@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional,List
 from datetime import datetime
 
 class CustomerCreate(BaseModel):
@@ -34,3 +34,6 @@ class CustomerOut(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+
+class CustomerBulkUpdate(BaseModel):
+    updates: List[CustomerCreate]
