@@ -7,50 +7,6 @@ from app.services.storage import save_upload_file
 
 router = APIRouter(prefix="/company", tags=["Company Management"])
 
-# 🟢 Create Company (SuperAdmin)
-# @router.post("/")
-# async def create_company(data: dict, user=Depends(require_roles("superadmin"))):
-
-#     # ---- STEP 1: Check if user already exists ----
-#     if await db.users.find_one({"username": data["username"]}):
-#         raise HTTPException(status_code=400, detail="Username already exists")
-
-#     if await db.users.find_one({"email": data["email"]}):
-#         raise HTTPException(status_code=400, detail="Email already exists")
-
-#     # ---- STEP 2: Create User Entry ----
-#     user_doc = {
-#         "username": data["username"],
-#         "email": data["email"],
-#         "password": hash_password(data["password"]),
-#         "role": "company",
-#         "status": "active",
-#         "created_at": datetime.utcnow(),
-#         "updated_at": datetime.utcnow(),
-#     }
-#     user_result = await db.users.insert_one(user_doc)
-#     user_id = str(user_result.inserted_id)
-
-#     # ---- STEP 3: Create Company Entry ----
-#     company_doc = {
-#         "company_name": data["company_name"],
-#         "description": data.get("description"),
-#         "mobile": data["mobile"],
-#         "logo_url": data.get("logo_url"),
-#         "user_id": user_id,                    # FOREIGN KEY
-#         "status": "active",
-#         "created_at": datetime.utcnow(),
-#         "updated_at": datetime.utcnow(),
-#     }
-
-#     company_result = await db.companies.insert_one(company_doc)
-
-#     return {
-#         "message": "Company created successfully",
-#         "company_id": str(company_result.inserted_id),
-#         "user_id": user_id
-#     }
-
 @router.post("/")
 async def create_company(
     username: str = Form(...),
