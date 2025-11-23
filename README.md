@@ -10,3 +10,5 @@ pip install -r requirements.txt
 
 # change Mango URI: (Paste Your Mongo server URI)
 MONGO_URI = "mongodb+srv://<username>:<password>@<cluster>/<db_name>?retryWrites=true&w=majority"
+
+pip install python-multipart
