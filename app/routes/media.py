@@ -54,12 +54,15 @@ async def upload_media(
         raise HTTPException(400, "Unsupported file type")
 
     # 4. Save file
-    local_path, size = await save_upload_file(file, company_id)
+    print("reached here")
+    # local_path, size = await save_upload_file(file, company_id)
+    local_path, public_url, size = await save_upload_file(file, company_id)
+
 
     # 5. Create media document
     media_doc = {
         "company_id": company_id,
-        "file_url": local_path,
+        "file_url": public_url,
         "file_type": (
             "video" if ext in ["mp4", "mov"]
             else "audio" if ext in ["mp3", "wav"]
