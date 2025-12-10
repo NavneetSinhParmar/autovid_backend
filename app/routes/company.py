@@ -105,7 +105,6 @@ async def list_companies(user=Depends(require_roles("superadmin"))):
 
 # 🟠 Get single company
 @router.get("/{company_id}")
-@router.get("/")
 async def list_companies(user=Depends(require_roles("superadmin"))):
     companies = []
 
