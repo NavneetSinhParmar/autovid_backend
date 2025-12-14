@@ -90,6 +90,7 @@ async def get_profile(user=Depends(get_current_user)):
 
     role = user.get("role")
     user_id = str(user["_id"])    # convert to string for company / customer lookups
+    print("Fetching profile for user_id:", user, "with role:", role)
 
     if role == "superadmin":
         return {

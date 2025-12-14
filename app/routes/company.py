@@ -4,6 +4,8 @@ from bson import ObjectId
 from app.db.connection import db
 from app.utils.auth import require_roles, hash_password
 from app.services.storage import save_upload_file
+from typing import Optional
+from app.services.url import build_media_url
 
 router = APIRouter(prefix="/company", tags=["Company Management"])
 
@@ -16,7 +18,7 @@ async def create_company(
     mobile: str = Form(...),
     description: str = Form(None),
     logo_file: UploadFile = File(None),
-    user=Depends(require_roles("superadmin"))
+    user=Depends(require_roles("superadmin")),
 ):
 
     # ---- STEP 1: Check if user already exists ----
@@ -44,7 +46,8 @@ async def create_company(
     if logo_file:
         local_path, size = await save_upload_file(logo_file, user_id)
 
-        logo_url = local_path                     # local disk path
+        logo_url = local_path      
+                     # local disk path
 
     # ---- STEP 4: Create Company Entry ----
     company_doc = {
@@ -64,7 +67,7 @@ async def create_company(
         "message": "Company created successfully",
         "company_id": str(company_result.inserted_id),
         "user_id": user_id,
-        "logo_url": logo_url
+        "logo_url": build_media_url(logo_url)
     }
 
 # 🔵 Get all companies
@@ -103,74 +106,141 @@ async def list_companies(user=Depends(require_roles("superadmin"))):
     return companies
 
 
-# 🟠 Get single company
+# 🟠 Get single company by ID
+from fastapi import Request
+
 @router.get("/{company_id}")
-async def list_companies(user=Depends(require_roles("superadmin"))):
-    companies = []
+async def get_company_detail(company_id: str,request: Request):
+    company = await db.companies.find_one({"_id": ObjectId(company_id)})
+    if not company:
+        raise HTTPException(404, "Company not found")
 
-    async for c in db.companies.find():
+    company["company_id"] = str(company["_id"])
+    company.pop("_id", None)
 
-        # Convert company ID
-        company_id = str(c["_id"])
-        c["id"] = company_id
-        c.pop("_id", None)
+    # 🔥 Convert logo path to public URL
+    if company.get("logo_url"):
+        company["logo_url"] = f"{request.base_url}media/{company['logo_url']}"
 
-        # Fetch user
-        user_data = await db.users.find_one(
-            {"_id": ObjectId(c["user_id"])},
-            {"password": 0}
-        )
+    return company
 
-        # Merge user fields at root level without overriding company data
-        if user_data:
-            c["user_id"] = str(user_data["_id"])
-            c["username"] = user_data["username"]
-            c["email"] = user_data["email"]
-            c["role"] = user_data["role"]
+# @router.get("/{company_id}")
+# async def get_company(company_id: str, user=Depends(require_roles("superadmin"))):
 
-            # optionally add these:
-            c["user_status"] = user_data["status"]
-            c["user_created_at"] = user_data["created_at"]
-            c["user_updated_at"] = user_data["updated_at"]
+#     # ---- STEP 1: Find company ----
+#     company = await db.companies.find_one({"_id": ObjectId(company_id)})
 
-        companies.append(c)
+#     if not company:
+#         raise HTTPException(status_code=404, detail="Company not found")
 
-    return companies
+#     # ---- STEP 2: Convert company ID ----
+#     company["company_id"] = str(company["_id"])
+#     company.pop("_id", None)
+
+#     # ---- STEP 3: Fetch linked user ----
+#     user_data = await db.users.find_one(
+#         {"_id": ObjectId(company["user_id"])},
+#         {"password": 0}   # exclude password
+#     )
+
+#     if user_data:
+#         company["user_id"] = str(user_data["_id"])
+#         company["username"] = user_data["username"]
+#         company["email"] = user_data["email"]
+#         company["role"] = user_data["role"]
+#         company["user_status"] = user_data["status"]
+#         company["user_created_at"] = user_data["created_at"]
+#         company["user_updated_at"] = user_data["updated_at"]
+
+#     return company
 
 
 # 🟣 Update company
 @router.patch("/{company_id}")
-async def update_company(company_id: str, data: dict, user=Depends(require_roles("superadmin"))):
+async def update_company(
+    company_id: str,
 
-    # Prevent updating user_id manually
-    if "user_id" in data:
-        del data["user_id"]
+    company_name: Optional[str] = Form(None),
+    mobile: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    status: Optional[str] = Form(None),
 
-    data["updated_at"] = datetime.utcnow()
+    logo_file: UploadFile = File(None),
 
-    result = await db.companies.update_one(
-        {"_id": ObjectId(company_id)},
-        {"$set": data}
-    )
+    user=Depends(require_roles("superadmin"))
+):
 
-    if result.matched_count == 0:
+    # ---- STEP 1: Check company exists ----
+    company = await db.companies.find_one({"_id": ObjectId(company_id)})
+    if not company:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    return {"message": "Company updated successfully"}
+    # ---- STEP 2: Prepare update data ----
+    update_data = {}
+
+    if company_name is not None:
+        update_data["company_name"] = company_name
+
+    if mobile is not None:
+        update_data["mobile"] = mobile
+
+    if description is not None:
+        update_data["description"] = description
+
+    if status is not None:
+        update_data["status"] = status
+
+    # ---- STEP 3: Handle logo upload ----
+    if logo_file:
+        local_path, size = await save_upload_file(logo_file, company["user_id"])
+        update_data["logo_url"] = local_path
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No data provided for update")
+
+    update_data["updated_at"] = datetime.utcnow()
+
+    # ---- STEP 4: Update DB ----
+    await db.companies.update_one(
+        {"_id": ObjectId(company_id)},
+        {"$set": update_data}
+    )
+
+    return {
+        "message": "Company updated successfully",
+        "updated_fields": list(update_data.keys())
+    }
+
 
 
 # 🔴 Delete company (also delete linked user)
 @router.delete("/{company_id}")
-async def delete_company(company_id: str, user=Depends(require_roles("superadmin"))):
+async def delete_company(
+    company_id: str,
+    user=Depends(require_roles("superadmin"))
+):
 
     company = await db.companies.find_one({"_id": ObjectId(company_id)})
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    # Delete company entry
+    # 🔥 Convert user_id safely
+    try:
+        user_object_id = ObjectId(company["user_id"])
+    except Exception:
+        raise HTTPException(500, "Invalid user_id stored in company")
+
+    # Delete company
     await db.companies.delete_one({"_id": ObjectId(company_id)})
 
     # Delete linked user
-    await db.users.delete_one({"_id": ObjectId(company["user_id"])})
+    result = await db.users.delete_one({"_id": user_object_id})
 
-    return {"message": "Company and linked user deleted successfully"}
+    if result.deleted_count == 0:
+        raise HTTPException(500, "Linked user not found or already deleted")
+
+    return {
+        "message": "Company and linked user deleted successfully",
+        "deleted_user_id": str(user_object_id)
+    }
+

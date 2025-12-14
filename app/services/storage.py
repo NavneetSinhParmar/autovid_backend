@@ -4,13 +4,23 @@ from typing import Tuple
 
 LOCAL_MEDIA_ROOT = os.getenv("LOCAL_MEDIA_ROOT", "./media")
 
-def save_file_local(file_obj, company_id: str, filename: str) -> str:
-    os.makedirs(os.path.join(LOCAL_MEDIA_ROOT, company_id), exist_ok=True)
-    unique = f"{uuid.uuid4().hex}_{filename}"
-    path = os.path.join(LOCAL_MEDIA_ROOT, company_id, unique)
-    with open(path, "wb") as f:
+def save_file_local(file_obj: bytes, company_id: str, filename: str) -> str:
+    # Ensure company folder exists
+    company_folder = os.path.join(LOCAL_MEDIA_ROOT, company_id)
+    os.makedirs(company_folder, exist_ok=True)
+
+    unique_name = f"{uuid.uuid4().hex}_{filename}"
+
+    # Full filesystem path (OS dependent, internal use only)
+    full_path = os.path.join(company_folder, unique_name)
+
+    with open(full_path, "wb") as f:
         f.write(file_obj)
-        return path
+
+    # 🔥 Return RELATIVE web-safe path
+    # NOT ./media/... and NOT backslashes
+    return f"{company_id}/{unique_name}"
+
 
 async def save_upload_file(file, company_id: str) -> Tuple[str, int]:
     content = await file.read()

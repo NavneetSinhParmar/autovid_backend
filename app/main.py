@@ -4,9 +4,12 @@ from app.routes import auth, company, customer, admin, media
 from app.db.connection import db
 from app.utils.auth import hash_password
 import asyncio
+from fastapi.staticfiles import StaticFiles
+
 
 # ✅ Create app instance only once
 app = FastAPI(title="AutoVid Backend")
+app.mount("/media", StaticFiles(directory="media"), name="media")
 
 # ✅ CORS setup
 origins = [
