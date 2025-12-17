@@ -274,6 +274,65 @@ async def get_customer(customer_id: str, user=Depends(require_roles("superadmin"
 # 🟠 UPDATE CUSTOMER
 # --------------------------------------------------------
 @router.patch("/{customer_id}")
+async def update_customer(
+    customer_id: str,
+
+    customer_company_name: str = Form(None),
+    full_name: str = Form(None),
+    city: str = Form(None),
+    phone_number: str = Form(None),
+    telephone_number: str = Form(None),
+    address: str = Form(None),
+    status: str = Form(None),
+    logo_url: UploadFile = File(None),
+
+
+    user=Depends(require_roles("company"))
+):
+    # ---- Check customer exists ----
+    customer = await db.customers.find_one({"_id": ObjectId(customer_id)})
+    if not customer:
+        raise HTTPException(404, "Customer not found")
+
+    # ---- Build dynamic update dict ----
+    update_data = {}
+
+    if customer_company_name is not None:
+        update_data["customer_company_name"] = customer_company_name
+    if full_name is not None:
+        update_data["full_name"] = full_name
+    if city is not None:
+        update_data["city"] = city
+    if phone_number is not None:
+        update_data["phone_number"] = phone_number
+    if telephone_number is not None:
+        update_data["telephone_number"] = telephone_number
+    if address is not None:
+        update_data["address"] = address
+    if status is not None:
+        update_data["status"] = status
+    if logo_url is not None:
+        from app.services.storage import save_upload_file
+        path, _ = await save_upload_file(logo_url, f"customer_{customer_id}")
+        update_data["logo_url"] = path
+
+    if not update_data:
+        raise HTTPException(400, "No fields provided to update")
+
+    update_data["updated_at"] = datetime.utcnow()
+
+    # ---- Update MongoDB ----
+    await db.customers.update_one(
+        {"_id": ObjectId(customer_id)},
+        {"$set": update_data}
+    )
+
+    return {
+        "message": "Customer updated successfully",
+        "updated_fields": list(update_data.keys())
+    }
+
+'''@router.patch("/{customer_id}")
 async def update_customer(customer_id: str, data: Dict, 
                           user=Depends(require_roles("superadmin", "company"))):
 
@@ -290,7 +349,7 @@ async def update_customer(customer_id: str, data: Dict,
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    return {"message": "Customer updated successfully"}
+    return {"message": "Customer updated successfully"}'''
 
 # --------------------------------------------------------
 # 🔴 DELETE CUSTOMER + LINKED USER

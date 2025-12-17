@@ -9,6 +9,7 @@ class Template(BaseModel):
     category: str
     base_video_url: Optional[str]
     base_image_url: Optional[str]
+    base_audio_url: Optional[str]
 
     duration: float
     trim: Optional[dict]         # {start, end}
