@@ -6,6 +6,7 @@ from typing import Union, List, Dict, Any
 from app.db.connection import db
 from app.utils.auth import require_roles, hash_password
 from app.models.customer_model import CustomerCreate, CustomerOut
+from fastapi import Request, UploadFile, File, Form
 
 router = APIRouter(prefix="/customer", tags=["Customer Management"])
 
@@ -91,31 +92,92 @@ async def create_single_customer(data: Dict[str, Any], user: Dict):
 # --------------------------------------------------------
 @router.post("/")
 async def create_customer_handler(
-    data: Union[Dict, List[Dict]],
-    user=Depends(require_roles("superadmin", "company"))
+    request: Request,
+    logo_file: UploadFile = File(None),  # optional
+    user=Depends(require_roles("superadmin", "company")),
 ):
+    content_type = request.headers.get("content-type", "")
 
-    # 🔵 Bulk Creation
-    if isinstance(data, list):
-        if not data:
-            raise HTTPException(status_code=400, detail="Input list cannot be empty")
+    # ----------------------------------
+    # 🔵 CASE 1: JSON → Bulk or Single
+    # ----------------------------------
+    if content_type.startswith("application/json"):
+        data = await request.json()
 
-        results = []
-        for item in data:
-            try:
-                result = await create_single_customer(item, user)
-                results.append({"success": True, "data": result})
-            except HTTPException as e:
-                results.append({"success": False, "error": e.detail, "data": item})
+        # 🔹 Bulk
+        if isinstance(data, list):
+            if not data:
+                raise HTTPException(status_code=400, detail="Input list cannot be empty")
 
-        return {
-            "message": "Bulk creation completed",
-            "total": len(data),
-            "results": results,
-        }
+            results = []
+            for item in data:
+                try:
+                    res = await create_single_customer(item, user)
+                    results.append({"success": True, "data": res})
+                except HTTPException as e:
+                    results.append({"success": False, "error": e.detail, "data": item})
 
-    # 🔵 Single Creation
-    return await create_single_customer(data, user)
+            return {
+                "message": "Bulk creation completed",
+                "total": len(data),
+                "results": results,
+            }
+
+        # 🔹 Single JSON (no file)
+        return await create_single_customer(data, user)
+
+    # ----------------------------------
+    # 🟢 CASE 2: FORM-DATA → Single + File
+    # ----------------------------------
+    elif content_type.startswith("multipart/form-data"):
+        form = await request.form()
+
+        # Convert form-data → dict (NO bytes issue)
+        data = dict(form)
+
+        # Remove file object from dict
+        data.pop("logo_file", None)
+
+        # Save logo if provided
+        if logo_file:
+            from app.services.storage import save_upload_file
+            path, _ = await save_upload_file(logo_file, data["username"])
+            data["logo_url"] = path
+
+        return await create_single_customer(data, user)
+
+    else:
+        raise HTTPException(status_code=415, detail="Unsupported Content-Type")
+
+# @router.post("/")
+# async def create_customer_handler(
+#     data: Union[Dict, List[Dict]],
+#     user=Depends(require_roles("superadmin", "company"))
+# ):
+
+#     # 🔵 Bulk Creation
+#     if isinstance(data, list):
+#         if not data:
+#             raise HTTPException(status_code=400, detail="Input list cannot be empty")
+
+#         results = []
+#         for item in data:
+#             try:
+#                 result = await create_single_customer(item, user)
+#                 results.append({"success": True, "data": result})
+#             except HTTPException as e:
+#                 results.append({"success": False, "error": e.detail, "data": item})
+
+#         return {
+#             "message": "Bulk creation completed",
+#             "total": len(data),
+#             "results": results,
+#         }
+
+#     else:
+#         # 🔵 Single Creation
+#         print("Single customer creation")
+#         return await create_single_customer(data, user)
 
 # --------------------------------------------------------
 # 🔵 LIST CUSTOMERS WITH USER + COMPANY JOIN

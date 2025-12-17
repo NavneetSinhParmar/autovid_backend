@@ -165,7 +165,7 @@ async def update_company(
     description: Optional[str] = Form(None),
     status: Optional[str] = Form(None),
 
-    logo_file: UploadFile = File(None),
+    logo_file: Optional[UploadFile] = File(None),
 
     user=Depends(require_roles("superadmin"))
 ):
