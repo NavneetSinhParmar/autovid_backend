@@ -4,17 +4,24 @@ from bson import ObjectId
 
 from app.db.connection import db
 from app.utils.auth import require_roles
-from app.models.template_model import Template
 
 router = APIRouter(prefix="/templates", tags=["Templates"])
 
+
+# ================= CREATE TEMPLATE =================
 @router.post("/")
 async def create_template(
     data: dict,
     user=Depends(require_roles("company"))
 ):
-    # find company of logged-in user
-    company = await db.companies.find_one({"user_id": user["id"]})
+    print("User creating template:", user)
+
+    company = await db.companies.find_one({
+        "user_id": str(user["_id"])
+    })
+
+    print("Creating template for company:", company)
+
     if not company:
         raise HTTPException(400, "Company not found")
 
@@ -27,7 +34,7 @@ async def create_template(
         "base_audio_url": data.get("base_audio_url"),
         "duration": data.get("duration"),
         "trim": data.get("trim"),
-        "template_json": data["template_json"],  # STORE AS IS
+        "template_json": data["template_json"],
         "status": "active",
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
@@ -40,10 +47,14 @@ async def create_template(
         "template_id": str(result.inserted_id)
     }
 
+
+# ================= LIST TEMPLATES =================
 @router.get("/")
 async def list_templates(user=Depends(require_roles("company"))):
 
-    company = await db.companies.find_one({"user_id": user["id"]})
+    company = await db.companies.find_one({
+        "user_id": str(user["_id"])
+    })
 
     templates = await db.templates.find({
         "company_id": str(company["_id"]),
@@ -56,10 +67,15 @@ async def list_templates(user=Depends(require_roles("company"))):
 
     return {"templates": templates}
 
-@router.get("/{template_id}")
-async def get_template(template_id: str, user=Depends(require_roles("company"))):
 
-    template = await db.templates.find_one({"_id": ObjectId(template_id)})
+# ================= GET TEMPLATE =================
+@router.get("/{template_id}")
+async def get_template(template_id: str):
+
+    template = await db.templates.find_one({
+        "_id": ObjectId(template_id),
+        "status": "active"
+    })
 
     if not template:
         raise HTTPException(404, "Template not found")
@@ -69,7 +85,9 @@ async def get_template(template_id: str, user=Depends(require_roles("company")))
 
     return {"template": template}
 
-@router.put("/{template_id}")
+
+# ================= UPDATE TEMPLATE (PATCH) =================
+@router.patch("/{template_id}")
 async def update_template(
     template_id: str,
     data: dict,
@@ -77,26 +95,16 @@ async def update_template(
 ):
     await db.templates.update_one(
         {"_id": ObjectId(template_id)},
-        {"$set": {
-            "template_name": data.get("template_name"),
-            "category": data.get("category"),
-            "base_video_url": data.get("base_video_url"),
-            "base_image_url": data.get("base_image_url"),
-            "base_audio_url": data.get("base_audio_url"),
-            "duration": data.get("duration"),
-            "trim": data.get("trim"),
-            "template_json": data.get("template_json"),
-            "updated_at": datetime.utcnow()
-        }}
+        {"$set": {**data, "updated_at": datetime.utcnow()}}
     )
 
     return {"message": "Template updated successfully"}
 
+
+# ================= DELETE TEMPLATE =================
 @router.delete("/{template_id}")
-async def delete_template(
-    template_id: str,
-    user=Depends(require_roles("company"))
-):
+async def delete_template(template_id: str):
+
     await db.templates.update_one(
         {"_id": ObjectId(template_id)},
         {"$set": {"status": "deleted"}}
