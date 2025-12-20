@@ -5,7 +5,7 @@ from app.services.storage import save_upload_file
 from app.utils.auth import require_roles
 from app.db.connection import db
 
-router = APIRouter(prefix="/media", tags=["media"])
+router = APIRouter(prefix="/media-api", tags=["media"])
 
 # -----------------------------------------------------------
 # ObjectId Serializer
