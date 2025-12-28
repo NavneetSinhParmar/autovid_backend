@@ -4,6 +4,7 @@ from bson import ObjectId
 
 from app.db.connection import db
 from app.utils.auth import require_roles
+import subprocess
 
 router = APIRouter(prefix="/templates", tags=["Templates"])
 
@@ -111,3 +112,45 @@ async def delete_template(template_id: str):
     )
 
     return {"message": "Template deleted"}
+
+
+@router.post("/{template_id}/preview")
+async def preview_template(
+    template_id: str,
+    user=Depends(require_roles("company"))
+):
+    template = await db.templates.find_one({"_id": ObjectId(template_id)})
+
+    if not template:
+        raise HTTPException(404, "Template not found")
+
+    # ---- STEP 1: Get base video ----
+    base_video = template.get("base_video_url")
+    if not base_video:
+        raise HTTPException(400, "Base video not found")
+
+    # ---- STEP 2: Create preview output ----
+    preview_path = f"media/previews/{template_id}_preview.mp4"
+
+    # ---- STEP 3: FFmpeg preview command (2 sec only) ----
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i", base_video,
+        "-t", "2",
+        "-vf", "scale=720:1280",
+        preview_path
+    ]
+
+    subprocess.run(cmd, check=True)
+
+    # ---- STEP 4: Save preview url ----
+    await db.templates.update_one(
+        {"_id": ObjectId(template_id)},
+        {"$set": {"preview_url": preview_path}}
+    )
+
+    return {
+        "message": "Preview generated",
+        "preview_url": preview_path
+    }

@@ -1,17 +1,18 @@
-from pydantic import BaseModel, EmailStr
-from typing import Optional,List
+from pydantic import BaseModel
+from typing import Optional
 from datetime import datetime
 
 class VideoTask(BaseModel):
-    id: str               # Celery task id
-    customer_id: str
+    id: str
     company_id: str
+    customer_id: str
     template_id: str
 
-    status: str           # pending/processing/completed/failed
-    render_progress: int  # 0–100 %
+    status: str              # pending | processing | completed | failed
+    progress: int = 0        # 0–100
 
-    output_url: Optional[str]
-    
+    output_video_url: Optional[str] = None
+    error: Optional[str] = None
+
     created_at: datetime
     updated_at: datetime

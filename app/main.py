@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import auth, company, customer, admin, media, template
+from app.routes import auth, company, customer, admin, media, template, video_task, task
 from app.db.connection import db
 from app.utils.auth import hash_password
 import asyncio
@@ -33,6 +33,8 @@ app.include_router(customer.router)
 app.include_router(admin.router)
 app.include_router(media.router)
 app.include_router(template.router)
+app.include_router(video_task.router)
+app.include_router(task.router)
 
 # ✅ Simple health check route
 @app.get("/")
