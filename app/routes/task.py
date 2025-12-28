@@ -4,7 +4,7 @@ from bson import ObjectId
 
 from app.db.connection import db
 from app.utils.auth import require_roles
-from app.workers.video_worker import start_video_render
+from app.worker.video_worker import render_video_task
 
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
@@ -51,7 +51,7 @@ async def generate_video(
     task_id = str(result.inserted_id)
 
     # 5. Start background rendering
-    start_video_render(task_id)
+    render_video_task(task_id)
 
     return {
         "message": "Video generation started",
