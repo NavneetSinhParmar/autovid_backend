@@ -19,7 +19,7 @@ def save_file_local(file_obj: bytes, company_id: str, filename: str) -> str:
 
     # 🔥 Return RELATIVE web-safe path
     # NOT ./media/... and NOT backslashes
-    return f"{company_id}/{unique_name}"
+    return f"{LOCAL_MEDIA_ROOT}/{company_id}/{unique_name}"
 
 
 async def save_upload_file(file, company_id: str) -> Tuple[str, int]:
