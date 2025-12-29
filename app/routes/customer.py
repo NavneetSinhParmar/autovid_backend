@@ -9,7 +9,7 @@ from app.models.customer_model import CustomerCreate, CustomerOut
 from fastapi import Request, UploadFile, File, Form
 
 router = APIRouter(prefix="/customer", tags=["Customer Management"])
-
+print("Customer router loaded")
 # --------------------------------------------------------
 # 🟢 Helper: Convert string → ObjectId with safe handling
 # --------------------------------------------------------
@@ -23,6 +23,7 @@ def to_oid(value: str):
 # 🟢 Helper: Validate and Create Customer Document
 # --------------------------------------------------------
 async def create_single_customer(data: Dict[str, Any], user: Dict):
+    print("Creating single customer with data:", data)
 
     # 1️⃣ If logged user is COMPANY → auto set linked_company_id
     if user["role"] == "company":
