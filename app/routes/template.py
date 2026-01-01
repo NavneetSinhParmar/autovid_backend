@@ -5,7 +5,8 @@ from bson import ObjectId
 from app.db.connection import db
 from app.utils.auth import require_roles
 import subprocess
-
+from app.services.video_renderer import render_preview
+import os 
 router = APIRouter(prefix="/templates", tags=["Templates"])
 
 
@@ -114,12 +115,17 @@ async def delete_template(template_id: str):
     return {"message": "Template deleted"}
 
 
+
+
 @router.post("/{template_id}/preview")
 async def preview_template(
     template_id: str,
     user=Depends(require_roles("company"))
 ):
     template = await db.templates.find_one({"_id": ObjectId(template_id)})
+    print("Generating preview for template:", template)
+
+    pass
 
     if not template:
         raise HTTPException(404, "Template not found")
@@ -130,18 +136,24 @@ async def preview_template(
         raise HTTPException(400, "Base video not found")
 
     # ---- STEP 2: Create preview output ----
-    preview_path = f"media/previews/{template_id}_preview.mp4"
+    preview_path = f"./media/{template_id}_preview.mp4"
+    print("Generating preview at:", preview_path)
 
     # ---- STEP 3: FFmpeg preview command (2 sec only) ----
+    ffmpeg_exe = r'C:\ffmpeg-2025-12-28-git-9ab2a437a1-full_build\bin\ffmpeg.exe'
+
+# 2. Construct the command list carefully
     cmd = [
-        "ffmpeg",
-        "-y",
-        "-i", base_video,
-        "-t", "2",
-        "-vf", "scale=720:1280",
+        ffmpeg_exe, 
+        '-y', 
+        '-i', base_video, 
+        '-t', '2', 
+        '-vf', 'scale=720:1280', 
         preview_path
     ]
 
+    # 3. Run it
+    print(f"DEBUG: Running command: {cmd}")   
     subprocess.run(cmd, check=True)
 
     # ---- STEP 4: Save preview url ----
