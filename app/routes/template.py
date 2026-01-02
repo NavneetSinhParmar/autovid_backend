@@ -6,6 +6,10 @@ from app.db.connection import db
 from app.utils.auth import require_roles
 import subprocess
 from app.services.video_renderer import render_preview
+from fastapi.concurrency import run_in_threadpool
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
+
 import os 
 router = APIRouter(prefix="/templates", tags=["Templates"])
 
@@ -115,54 +119,37 @@ async def delete_template(template_id: str):
     return {"message": "Template deleted"}
 
 
-
-
+# ================= PREVIEW TEMPLATE =================
 @router.post("/{template_id}/preview")
-async def preview_template(
-    template_id: str,
-    user=Depends(require_roles("company"))
-):
+async def preview_template(template_id: str):
     template = await db.templates.find_one({"_id": ObjectId(template_id)})
-    print("Generating preview for template:", template)
-
-    pass
-
     if not template:
-        raise HTTPException(404, "Template not found")
+        raise HTTPException(status_code=404, detail="Template nahi mila!")
 
-    # ---- STEP 1: Get base video ----
-    base_video = template.get("base_video_url")
-    if not base_video:
-        raise HTTPException(400, "Base video not found")
+    # Fetch company name for watermarking
+    company_id = template.get("company_id")
+    company_name = "Our Company" # Default fallback
+    
+    if company_id:
+        company_data = await db.companies.find_one({"_id": ObjectId(company_id)})
+        if company_data:
+            company_name = company_data.get("company_name") or company_data.get("name") or "Our Company"
 
-    # ---- STEP 2: Create preview output ----
-    preview_path = f"./media/{template_id}_preview.mp4"
-    print("Generating preview at:", preview_path)
+    # 2. Prepare output path
+    media_dir = os.path.abspath("media")
+    os.makedirs(media_dir, exist_ok=True)
+    preview_filename = f"{template_id}_preview.mp4"
+    preview_path = os.path.join(media_dir, preview_filename)
 
-    # ---- STEP 3: FFmpeg preview command (2 sec only) ----
-    ffmpeg_exe = r'C:\ffmpeg-2025-12-28-git-9ab2a437a1-full_build\bin\ffmpeg.exe'
-
-# 2. Construct the command list carefully
-    cmd = [
-        ffmpeg_exe, 
-        '-y', 
-        '-i', base_video, 
-        '-t', '2', 
-        '-vf', 'scale=720:1280', 
-        preview_path
-    ]
-
-    # 3. Run it
-    print(f"DEBUG: Running command: {cmd}")   
-    subprocess.run(cmd, check=True)
-
-    # ---- STEP 4: Save preview url ----
-    await db.templates.update_one(
-        {"_id": ObjectId(template_id)},
-        {"$set": {"preview_url": preview_path}}
-    )
-
-    return {
-        "message": "Preview generated",
-        "preview_url": preview_path
-    }
+    try:
+        # 3. Render preview in thread pool
+        await run_in_threadpool(render_preview, template, preview_path)
+        
+        # return {"status": "success", "preview_url": f"/media/{preview_filename}"}
+        return FileResponse(
+            path=preview_path, 
+            media_type="video/mp4", 
+            filename=preview_filename
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
