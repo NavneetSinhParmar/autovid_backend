@@ -3,7 +3,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from datetime import datetime
 from bson import ObjectId
-
+import json
 from app.db.connection import db
 from app.utils.auth import require_roles
 from app.services.video_renderer import render_preview
@@ -151,3 +151,67 @@ async def preview_template(template_id: str):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+def replace_placeholders(template_json: dict, customer: dict) -> dict:
+    template_str = json.dumps(template_json)
+
+    template_str = template_str.replace(
+        "{{customer_company_name}}",
+        customer.get("customer_company_name", "")
+    )
+
+    return json.loads(template_str)
+
+
+@router.post("/{template_id}/preview/{customer_id}")
+async def preview_template(template_id: str, customer_id: str):
+
+    template = await db.templates.find_one({"_id": ObjectId(template_id)})
+    if not template:
+        raise HTTPException(status_code=404, detail="Template nahi mila")
+
+    customer = await db.customers.find_one({"_id": ObjectId(customer_id)})
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer nahi mila")
+
+    # 🔹 PLACEHOLDER REPLACEMENT
+    template["template_json"] = replace_placeholders(
+        template["template_json"],
+        customer
+    )
+
+    media_dir = os.path.abspath("media")
+    os.makedirs(media_dir, exist_ok=True)
+
+    preview_filename = f"{template_id}_{customer_id}_preview.mp4"
+    preview_path = os.path.join(media_dir, preview_filename)
+
+    try:
+        await run_in_threadpool(render_preview, template, preview_path)
+
+        return FileResponse(
+            path=preview_path,
+            media_type="video/mp4",
+            filename=preview_filename
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{template_id}/download/{customer_id}")
+async def download_video(template_id: str, customer_id: str):
+
+    filename = f"{template_id}_{customer_id}_preview.mp4"
+    file_path = os.path.abspath(os.path.join("media", filename))
+
+    if not os.path.exists(file_path):
+        raise HTTPException(
+            status_code=404,
+            detail="Video file nahi mili. Pehle preview generate karo."
+        )
+
+    return FileResponse(
+        path=file_path,
+        media_type="video/mp4",
+        filename=filename
+    )
