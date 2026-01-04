@@ -1,14 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
 from datetime import datetime
 from bson import ObjectId
 
 from app.db.connection import db
 from app.utils.auth import require_roles
-import subprocess
 from app.services.video_renderer import render_preview
-from fastapi.concurrency import run_in_threadpool
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
 
 import os 
 router = APIRouter(prefix="/templates", tags=["Templates"])
