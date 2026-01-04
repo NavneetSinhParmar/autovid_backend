@@ -1,3 +1,4 @@
+import re
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
@@ -152,17 +153,38 @@ async def preview_template(template_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+PLACEHOLDER_PATTERN = re.compile(r"{{\s*([^}]+)\s*}}")
+def get_nested_value(data: dict, path: str):
+    """
+    Supports dot notation like:
+    user.email
+    company.company_name
+    """
+    try:
+        for key in path.split("."):
+            data = data.get(key)
+            if data is None:
+                return ""
+        return str(data)
+    except Exception:
+        return ""
+
 def replace_placeholders(template_json: dict, customer: dict) -> dict:
+    """
+    Replaces {{field}} and {{nested.field}} placeholders
+    using customer JSON
+    """
     template_str = json.dumps(template_json)
 
-    template_str = template_str.replace(
-        "{{customer_company_name}}",
-        customer.get("customer_company_name", "")
-    )
+    def replacer(match):
+        key_path = match.group(1)  # e.g. user.email
+        return get_nested_value(customer, key_path)
+
+    template_str = PLACEHOLDER_PATTERN.sub(replacer, template_str)
 
     return json.loads(template_str)
 
-
+    
 @router.post("/{template_id}/preview/{customer_id}")
 async def preview_template(template_id: str, customer_id: str):
 
@@ -171,6 +193,7 @@ async def preview_template(template_id: str, customer_id: str):
         raise HTTPException(status_code=404, detail="Template nahi mila")
 
     customer = await db.customers.find_one({"_id": ObjectId(customer_id)})
+    print("Customer data:", customer)
     if not customer:
         raise HTTPException(status_code=404, detail="Customer nahi mila")
 
