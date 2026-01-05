@@ -7,6 +7,7 @@ import json
 from bson import ObjectId
 from app.db.connection import db
 
+DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 MEDIA_ROOT = "media/generated"
 
 def render_video(task_id: str):
@@ -27,7 +28,7 @@ def render_video(task_id: str):
     )
 
     cmd = [
-        "ffmpeg",
+        FFMPEG,
         "-y",
         "-i", base_video,
         "-vf", f"drawtext=text='{text}':x=200:y=300:fontsize=40:fontcolor=white",
@@ -45,8 +46,18 @@ def ensure_list(val):
         return val
     return [val]
 
-FFMPEG = r"C:\ffmpeg-2025-12-28-git-9ab2a437a1-full_build\bin\ffmpeg.exe"
-FONT = "C\\:/Windows/Fonts/arial.ttf" 
+if DEBUG:
+    # Windows Local
+    FFMPEG = r"C:\ffmpeg-2025-12-28-git-9ab2a437a1-full_build\bin\ffmpeg.exe"
+else:
+    # Docker / Linux Server
+    FFMPEG = "ffmpeg"
+
+if DEBUG:
+    FONT = "C:/Windows/Fonts/arial.ttf"
+else:
+    FONT = "/usr/share/fonts/truetype/custom/Arial.ttf"
+
 
 def to_local_path(url_or_path):
     if not url_or_path:
