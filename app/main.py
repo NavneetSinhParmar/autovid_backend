@@ -16,6 +16,7 @@ origins = [
     "http://localhost:3000",  # React frontend
     "http://127.0.0.1:3000",
     "https://your-frontend-domain.com"  # Production domain
+    "*"
 ]
 
 app.add_middleware(
