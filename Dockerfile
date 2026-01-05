@@ -4,7 +4,7 @@ RUN apt-get update && \
     apt-get install -y ffmpeg fontconfig && \
     rm -rf /var/lib/apt/lists/*
 
-COPY app/fonts /usr/share/fonts/truetype/custom
+COPY app/Fonts /usr/share/fonts/truetype/custom
 RUN fc-cache -f -v
 
 
