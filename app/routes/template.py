@@ -123,7 +123,7 @@ async def delete_template(template_id: str):
 async def preview_template(template_id: str):
     template = await db.templates.find_one({"_id": ObjectId(template_id)})
     if not template:
-        raise HTTPException(status_code=404, detail="Template nahi mila!")
+        raise HTTPException(status_code=404, detail="Template Does not exist!")
 
     # Fetch company name for watermarking
     company_id = template.get("company_id")
@@ -190,12 +190,12 @@ async def preview_template(template_id: str, customer_id: str):
 
     template = await db.templates.find_one({"_id": ObjectId(template_id)})
     if not template:
-        raise HTTPException(status_code=404, detail="Template nahi mila")
+        raise HTTPException(status_code=404, detail="Template does not exist")
 
     customer = await db.customers.find_one({"_id": ObjectId(customer_id)})
     print("Customer data:", customer)
     if not customer:
-        raise HTTPException(status_code=404, detail="Customer nahi mila")
+        raise HTTPException(status_code=404, detail="Customer does not exist")
 
     # 🔹 PLACEHOLDER REPLACEMENT
     template["template_json"] = replace_placeholders(
@@ -230,7 +230,7 @@ async def download_video(template_id: str, customer_id: str):
     if not os.path.exists(file_path):
         raise HTTPException(
             status_code=404,
-            detail="Video file nahi mili. Pehle preview generate karo."
+            detail="Video file does not exist. You must first generate a preview."
         )
 
     return FileResponse(
