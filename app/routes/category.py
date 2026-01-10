@@ -9,10 +9,11 @@ from app.models.category import (
 )
 from app.utils.auth import require_roles
 
-router = APIRouter(prefix="/categories", tags=["Categories"])
+router = APIRouter(prefix="/category", tags=["Category"])
 
 @router.post("/", response_model=CategoryOut)
-async def create_category(payload: CategoryCreate):
+async def create_category(payload: CategoryCreate,
+                          user=Depends(require_roles("superadmin", "company"))):
 
     # duplicate check
     existing = await db.categories.find_one({"name": payload.name})
@@ -38,7 +39,7 @@ async def create_category(payload: CategoryCreate):
     }
 
 @router.get("/", response_model=list[CategoryOut])
-async def get_categories():
+async def get_categories(user=Depends(require_roles("superadmin", "company"))):
 
     categories = []
     async for cat in db.categories.find():
@@ -49,8 +50,24 @@ async def get_categories():
 
     return categories
 
-@router.put("/{category_id}", response_model=CategoryOut)
-async def update_category(category_id: str, payload: CategoryUpdate):
+@router.get("/{category_id}", response_model=CategoryOut)
+async def get_category(category_id: str,user=Depends(require_roles("superadmin", "company"))):
+
+    category = await db.categories.find_one(
+        {"_id": ObjectId(category_id)}
+    )
+
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    return {
+        "id": str(category["_id"]),
+        **category
+    }
+
+
+@router.patch("/{category_id}", response_model=CategoryOut)
+async def update_category(category_id: str, payload: CategoryUpdate,user=Depends(require_roles("superadmin", "company"))):
 
     update_data = {k: v for k, v in payload.dict().items() if v is not None}
     if not update_data:
@@ -75,12 +92,11 @@ async def update_category(category_id: str, payload: CategoryUpdate):
 
 @router.delete("/{category_id}")
 async def delete_category(
-    category_id: str,
-    user=Depends(require_roles("superadmin", "company"))
+    category_id: str,user=Depends(require_roles("superadmin", "company"))
 ):
     query = {"_id": ObjectId(category_id)}
-
-    if user["role"] == "company":
+    print(user)
+    if user.get("role") == "company":
         query["company_id"] = ObjectId(user["company_id"])
 
     result = await db.categories.delete_one(query)
