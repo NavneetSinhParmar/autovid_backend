@@ -6,6 +6,7 @@ from app.utils.auth import require_roles, hash_password
 from app.services.storage import save_upload_file
 from typing import Optional
 from app.services.url import build_media_url
+from fastapi import Request
 
 router = APIRouter(prefix="/company", tags=["Company Management"])
 
@@ -107,7 +108,6 @@ async def list_companies(user=Depends(require_roles("superadmin"))):
 
 
 # 🟠 Get single company by ID
-from fastapi import Request
 
 @router.get("/{company_id}")
 async def get_company_detail(company_id: str,request: Request):
@@ -123,36 +123,6 @@ async def get_company_detail(company_id: str,request: Request):
         company["logo_url"] = f"{request.base_url}media/{company['logo_url']}"
 
     return company
-
-# @router.get("/{company_id}")
-# async def get_company(company_id: str, user=Depends(require_roles("superadmin"))):
-
-#     # ---- STEP 1: Find company ----
-#     company = await db.companies.find_one({"_id": ObjectId(company_id)})
-
-#     if not company:
-#         raise HTTPException(status_code=404, detail="Company not found")
-
-#     # ---- STEP 2: Convert company ID ----
-#     company["company_id"] = str(company["_id"])
-#     company.pop("_id", None)
-
-#     # ---- STEP 3: Fetch linked user ----
-#     user_data = await db.users.find_one(
-#         {"_id": ObjectId(company["user_id"])},
-#         {"password": 0}   # exclude password
-#     )
-
-#     if user_data:
-#         company["user_id"] = str(user_data["_id"])
-#         company["username"] = user_data["username"]
-#         company["email"] = user_data["email"]
-#         company["role"] = user_data["role"]
-#         company["user_status"] = user_data["status"]
-#         company["user_created_at"] = user_data["created_at"]
-#         company["user_updated_at"] = user_data["updated_at"]
-
-#     return company
 
 
 # 🟣 Update company
@@ -210,7 +180,6 @@ async def update_company(
         "message": "Company updated successfully",
         "updated_fields": list(update_data.keys())
     }
-
 
 
 # 🔴 Delete company (also delete linked user)
