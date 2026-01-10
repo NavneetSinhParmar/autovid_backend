@@ -95,9 +95,6 @@ async def delete_category(
     category_id: str,user=Depends(require_roles("superadmin", "company"))
 ):
     query = {"_id": ObjectId(category_id)}
-    print(user)
-    if user.get("role") == "company":
-        query["company_id"] = ObjectId(user["company_id"])
 
     result = await db.categories.delete_one(query)
 
