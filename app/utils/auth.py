@@ -50,6 +50,7 @@ def create_access_token(data: dict):
 
 def require_roles(*roles):
     async def wrapper(user=Depends(get_current_user)):
+        print("Checking roles for user:", user)
         if user["role"] not in roles:
             raise HTTPException(status_code=403, detail="Access denied")
         return user
