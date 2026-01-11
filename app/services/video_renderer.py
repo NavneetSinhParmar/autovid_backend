@@ -299,85 +299,66 @@ def render_preview(template: dict, output_path: str):
                 node_counter += 1
                 video_overlay_count += 1
 
-    # Process image items
+    # Process image items (FIXED)
     image_overlay_count = 0
     for item_id, item in track_items_map.items():
         if item.get("type") == "image":
             display = item.get("display", {})
             details = item.get("details", {})
-            
+
             start_time = ms_to_sec(display.get("from", 0))
             end_time = ms_to_sec(display.get("to", duration_seconds * 1000))
-            
+
             if item_id in input_map:
                 input_idx = input_map[item_id]
-                
-                # Get position and transform
+
                 left = parse_position(details.get("left", 0))
                 top = parse_position(details.get("top", 0))
-                width = details.get("width", 500)
-                height = details.get("height", 500)
+                width = int(details.get("width", 500))
+                height = int(details.get("height", 500))
                 opacity = details.get("opacity", 100) / 100.0
-                transform = details.get("transform", "scale(1, 1)")
-                
-                # Parse scale from transform
-                scale_x = 1.0
-                scale_y = 1.0
-                if "scale" in transform:
-                    scale_match = re.search(r'scale\(([^,]+),([^)]+)\)', transform)
-                    if scale_match:
-                        scale_x = float(scale_match.group(1))
-                        scale_y = float(scale_match.group(2))
-                
-                # Calculate scaled dimensions
-                scaled_width = int(width * scale_x)
-                scaled_height = int(height * scale_y)
-                
-                # Ensure minimum dimensions
-                scaled_width = max(scaled_width, 1)
-                scaled_height = max(scaled_height, 1)
-                
-                # Scale image and set duration
-                img_node = f"[img{node_counter}]"
-                # Scale to fit, crop to ensure we're within bounds, then pad
-                img_temp = f"[imgtemp{node_counter}]"
-                img_crop = f"[imgcrop{node_counter}]"
+
+                # Transform scale
+                transform = details.get("transform", "scale(1,1)")
+                scale_x = scale_y = 1.0
+                m = re.search(r'scale\(([^,]+),([^)]+)\)', transform)
+                if m:
+                    scale_x = float(m.group(1))
+                    scale_y = float(m.group(2))
+
+                scaled_w = max(1, int(width * scale_x))
+                scaled_h = max(1, int(height * scale_y))
+
+                img_node = f"[img{image_overlay_count}]"
+
+                # ✅ Correct image sizing
                 filter_parts.append(
-                    f"[{input_idx}:v]scale={scaled_width}:{scaled_height}:force_original_aspect_ratio=decrease{img_temp}"
-                )
-                # Crop to ensure dimensions are <= target (safety measure)
-                filter_parts.append(
-                    f"{img_temp}crop='min(iw,{scaled_width})':'min(ih,{scaled_height})'{img_crop}"
-                )
-                # Now pad is safe since dimensions are guaranteed <= target
-                filter_parts.append(
-                    f"{img_crop}pad={scaled_width}:{scaled_height}:(ow-iw)/2:(oh-ih)/2:color=black,"
+                    f"[{input_idx}:v]"
+                    f"scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease,"
+                    f"pad={scaled_w}:{scaled_h}:(ow-iw)/2:(oh-ih)/2:color=black,"
+                    f"format=rgba,"
                     f"setpts=PTS+{start_time}/TB,"
-                    f"loop=loop=-1:size=1:start=0,"
-                    f"trim=duration={end_time - start_time}{img_node}"
+                    f"trim=duration={end_time - start_time}"
+                    f"{img_node}"
                 )
-                
-                # Overlay image at specific time with opacity
-                overlay_node = f"[overlay_img{image_overlay_count}]"
-                # Handle negative positions - clamp to 0 minimum for overlay
-                overlay_x = max(0, int(left))
-                overlay_y = max(0, int(top))
-                
-                # Apply opacity if needed
+
+                # Opacity
                 if opacity < 1.0:
-                    img_opacity_node = f"[imgopacity{node_counter}]"
+                    op_node = f"[imgop{image_overlay_count}]"
                     filter_parts.append(
-                        f"{img_node}format=yuva420p,colorchannelmixer=aa={opacity}{img_opacity_node}"
+                        f"{img_node}colorchannelmixer=aa={opacity}{op_node}"
                     )
-                    img_node = img_opacity_node
-                
-                # Use overlay with enable expression for timing
+                    img_node = op_node
+
+                overlay_node = f"[overlay_img{image_overlay_count}]"
                 filter_parts.append(
-                    f"{current_node}{img_node}overlay={overlay_x}:{overlay_y}:enable='between(t,{start_time},{end_time})'{overlay_node}"
+                    f"{current_node}{img_node}"
+                    f"overlay={int(left)}:{int(top)}:"
+                    f"enable='between(t,{start_time},{end_time})'"
+                    f"{overlay_node}"
                 )
-                
+
                 current_node = overlay_node
-                node_counter += 1
                 image_overlay_count += 1
 
     # Process text items

@@ -4,6 +4,7 @@ from datetime import datetime
 
 class Template(BaseModel):
     id: str
+    template_type: str
     company_id: str
     template_name: str
     category: str

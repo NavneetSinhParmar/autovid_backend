@@ -33,6 +33,7 @@ async def create_template(
     template_doc = {
         "company_id": str(company["_id"]),
         "template_name": data["template_name"],
+        "template_type": data["template_type"],
         "category": data.get("category", "general"),
         "base_video_url": data.get("base_video_url"),
         "base_image_url": data.get("base_image_url"),
