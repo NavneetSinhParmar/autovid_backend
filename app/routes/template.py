@@ -40,6 +40,7 @@ async def create_template(
         "duration": data.get("duration"),
         "trim": data.get("trim"),
         "template_json": data["template_json"],
+        "type": data.get("type", "video"),
         "status": "active",
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
@@ -169,21 +170,35 @@ def get_nested_value(data: dict, path: str):
     except Exception:
         return ""
 
+# def replace_placeholders(template_json: dict, customer: dict) -> dict:
+#     """
+#     Replaces {{field}} and {{nested.field}} placeholders
+#     using customer JSON
+#     """
+#     template_str = json.dumps(template_json)
+
+#     def replacer(match):
+#         key_path = match.group(1)  # e.g. user.email
+#         return get_nested_value(customer, key_path)
+
+#     template_str = PLACEHOLDER_PATTERN.sub(replacer, template_str)
+
+#     return json.loads(template_str)
+
 def replace_placeholders(template_json: dict, customer: dict) -> dict:
-    """
-    Replaces {{field}} and {{nested.field}} placeholders
-    using customer JSON
-    """
     template_str = json.dumps(template_json)
 
-    def replacer(match):
-        key_path = match.group(1)  # e.g. user.email
-        return get_nested_value(customer, key_path)
+    replacements = {
+        "{{customer_company_name}}": customer.get("customer_company_name", ""),
+        "{{full_name}}": customer.get("full_name", ""),
+        "{{city}}": customer.get("city", ""),
+        "{{phone_number}}": customer.get("phone_number", "")
+    }
 
-    template_str = PLACEHOLDER_PATTERN.sub(replacer, template_str)
+    for key, value in replacements.items():
+        template_str = template_str.replace(key, value)
 
     return json.loads(template_str)
-
     
 @router.post("/{template_id}/preview/{customer_id}")
 async def preview_template(template_id: str, customer_id: str):

@@ -10,7 +10,7 @@ class Template(BaseModel):
     base_video_url: Optional[str]
     base_image_url: Optional[str]
     base_audio_url: Optional[str]
-
+    type: Optional[str] = "video" # "image | video | festival | birthday"
     duration: float
     trim: Optional[dict]         # {start, end}
 
