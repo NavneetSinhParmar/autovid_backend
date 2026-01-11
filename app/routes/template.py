@@ -121,7 +121,7 @@ async def delete_template(template_id: str):
 
 # ================= PREVIEW TEMPLATE =================
 @router.post("/{template_id}/preview")
-async def preview_template(template_id: str):
+async def preview_template_with_template(template_id: str):
     template = await db.templates.find_one({"_id": ObjectId(template_id)})
     if not template:
         raise HTTPException(status_code=404, detail="Template Does not exist!")

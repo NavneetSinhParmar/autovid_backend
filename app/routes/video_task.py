@@ -109,7 +109,7 @@ async def public_video_download(
     media_dir = os.path.abspath("media")
     os.makedirs(media_dir, exist_ok=True)
 
-    filename = f"{template_id}_{customer_id}.mp4"
+    filename = f"{template_id}_{customer_id}_preview.mp4"
     output_path = os.path.join(media_dir, filename)
 
     # 5️⃣ Render only if not exists
