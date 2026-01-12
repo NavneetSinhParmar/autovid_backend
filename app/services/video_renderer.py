@@ -19,44 +19,51 @@ def ensure_list(value):
     return [value]
 
 
-def to_local_path(url_or_path: str | None):
-    debug("RESOLVING MEDIA PATH")
+def to_local_path(src: str | None):
+    print("\n========== RESOLVING MEDIA PATH ==========")
 
-    if not url_or_path:
+    if not src:
         print("❌ EMPTY SRC")
         return None
 
-    print("RAW SRC:", url_or_path)
+    print("RAW SRC:", src)
 
-    media_root = os.path.abspath("media")
-
-    # 1️⃣ If full URL
-    if url_or_path.startswith("http"):
-        if "/media/" in url_or_path:
-            relative = url_or_path.split("/media/")[-1]
+    # 1️⃣ Remove domain if URL
+    if src.startswith("http"):
+        if "/media/" in src:
+            src = src.split("/media/")[-1]
         else:
-            relative = os.path.basename(url_or_path)
-    else:
-        relative = url_or_path
+            src = os.path.basename(src)
 
-    print("RELATIVE PART:", relative)
+    # 2️⃣ Normalize ./media → media
+    if src.startswith("./"):
+        src = src[2:]
 
-    # 2️⃣ Try exact relative path
-    candidate = os.path.abspath(os.path.join("media", relative))
-    print("TRY PATH:", candidate)
-    if os.path.exists(candidate):
+    # 3️⃣ If already starts with media/, DO NOT append media again
+    if src.startswith("media/"):
+        abs_path = os.path.abspath(src)
+        print("TRY DIRECT PATH:", abs_path)
+        if os.path.exists(abs_path):
+            print("✅ FOUND")
+            return abs_path
+
+    # 4️⃣ Otherwise assume file is inside media root
+    media_root = os.path.abspath("media")
+    abs_path = os.path.join(media_root, src)
+    print("TRY APPENDED PATH:", abs_path)
+    if os.path.exists(abs_path):
         print("✅ FOUND")
-        return candidate
+        return abs_path
 
-    # 3️⃣ Try only filename (legacy support)
-    filename = os.path.basename(relative)
-    candidate = os.path.join(media_root, filename)
-    print("TRY FLAT PATH:", candidate)
-    if os.path.exists(candidate):
+    # 5️⃣ Final fallback (filename only)
+    filename = os.path.basename(src)
+    abs_path = os.path.join(media_root, filename)
+    print("TRY FLAT PATH:", abs_path)
+    if os.path.exists(abs_path):
         print("✅ FOUND")
-        return candidate
+        return abs_path
 
-    print("❌ FILE NOT FOUND:", relative)
+    print("❌ FILE NOT FOUND:", src)
     return None
 
 
