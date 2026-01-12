@@ -63,9 +63,46 @@ def to_local_path(src: str | None):
         print("✅ FOUND")
         return abs_path
 
-    print("❌ FILE NOT FOUND:", src)
+    else:
+        filename_part = os.path.basename(src) # e.g. "040fa8d5..._7565885-hd.mp4"
+    # Suffix nikaalein (underscore ke baad wala hissa)
+    suffix = filename_part.split('_')[-1] if '_' in filename_part else filename_part
+
+    # Folder jahan file honi chahiye
+    parent_dir = os.path.dirname(src).replace('./', '')
+    search_dir = os.path.abspath(parent_dir if parent_dir else "media")
+
+    if os.path.exists(search_dir):
+        for f in os.listdir(search_dir):
+            if f.endswith(suffix):
+                found_path = os.path.join(search_dir, f)
+                print(f"✅ MATCH FOUND BY SUFFIX: {found_path}")
+                return found_path
+
+    print("❌ FILE NOT FOUND AT ALL:", src)
     return None
 
+def to_local_path(src: str | None):
+    # ... (baaki logic same rakhein starting ka)
+
+    # Naya logic: Agar exact path nahi milta, toh folder scan karo
+    filename_part = os.path.basename(src) # e.g. "040fa8d5..._7565885-hd.mp4"
+    # Suffix nikaalein (underscore ke baad wala hissa)
+    suffix = filename_part.split('_')[-1] if '_' in filename_part else filename_part
+
+    # Folder jahan file honi chahiye
+    parent_dir = os.path.dirname(src).replace('./', '')
+    search_dir = os.path.abspath(parent_dir if parent_dir else "media")
+
+    if os.path.exists(search_dir):
+        for f in os.listdir(search_dir):
+            if f.endswith(suffix):
+                found_path = os.path.join(search_dir, f)
+                print(f"✅ MATCH FOUND BY SUFFIX: {found_path}")
+                return found_path
+
+    print("❌ FILE NOT FOUND AT ALL:", src)
+    return None
 
 # ============================================================
 # MAIN RENDER FUNCTION
