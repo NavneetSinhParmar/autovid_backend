@@ -128,7 +128,17 @@ def render_preview(template: dict, output_path: str):
     template_json = template.get("template_json") or {}
     design = template_json.get("design") or {}
     track_items_map = design.get("trackItemsMap") or {}
-    
+    print("\n========== RENDER_PREVIEW DEBUG ==========")
+    print("Output path (FINAL VIDEO):", output_path)
+
+    print("Base Video URL:", template.get("base_video_url"))
+    print("Base Image URL:", template.get("base_image_url"))
+    print("Base Audio URL:", template.get("base_audio_url"))
+
+    print("Template JSON received:")
+    print(json.dumps(template.get("template_json"), indent=2))
+    print("=========================================\n")
+
     # Get video resolution and FPS from template JSON
     size = design.get("size", {})
     video_width = size.get("width", 1920)
@@ -635,6 +645,13 @@ def render_preview(template: dict, output_path: str):
 
     cmd += ["-map", current_node]
     cmd += ["-map", final_audio]
+
+    print("\n========== FFMPEG INPUT DEBUG ==========")
+    print("Video inputs:", video_inputs)
+    print("Image inputs:", image_inputs)
+    print("Audio inputs:", audio_inputs)
+    print("=======================================\n")
+
     
     cmd += [
         "-c:v", "libx264",
