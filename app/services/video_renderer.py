@@ -62,27 +62,63 @@ else:
 def to_local_path(url_or_path):
     if not url_or_path:
         return None
-    # 1. Extract filename from URL or path
-    filename = url_or_path.split("/")[-1]
 
-    # 2. Construct absolute path in media directory
     base_dir = os.path.abspath("media")
-    abs_path = os.path.join(base_dir, filename)
 
-    print(f"DEBUG: Looking for file at -> {abs_path}")
+    # 1️⃣ If full URL, strip domain
+    if url_or_path.startswith("http"):
+        if "/media/" in url_or_path:
+            url_or_path = url_or_path.split("/media/")[-1]
+        else:
+            url_or_path = url_or_path.split("/")[-1]
 
-    if os.path.exists(abs_path):
-        return abs_path
-    # 3. Check if it's a full URL containing /media/
-    if "/media/" in url_or_path:
-        relative_part = url_or_path.split("/media/")[-1]
-        abs_path = os.path.abspath(os.path.join("media", relative_part))
+    # 2️⃣ If already relative path (media/xxx)
+    if url_or_path.startswith("media/"):
+        abs_path = os.path.abspath(url_or_path)
         print(f"DEBUG: Checking file at -> {abs_path}")
         if os.path.exists(abs_path):
             return abs_path
 
-    print(f"❌ FILE NOT FOUND: {filename} is missing in {base_dir}")
+    # 3️⃣ Try flat media folder
+    filename = os.path.basename(url_or_path)
+    abs_path = os.path.join(base_dir, filename)
+    print(f"DEBUG: Looking for file at -> {abs_path}")
+    if os.path.exists(abs_path):
+        return abs_path
+
+    # 4️⃣ Try nested path (media/company_id/filename)
+    abs_path = os.path.abspath(os.path.join("media", url_or_path))
+    print(f"DEBUG: Checking file at -> {abs_path}")
+    if os.path.exists(abs_path):
+        return abs_path
+
+    print(f"❌ FILE NOT FOUND: {url_or_path}")
     return None
+
+# def to_local_path(url_or_path):
+#     if not url_or_path:
+#         return None
+#     # 1. Extract filename from URL or path
+#     filename = url_or_path.split("/")[-1]
+
+#     # 2. Construct absolute path in media directory
+#     base_dir = os.path.abspath("media")
+#     abs_path = os.path.join(base_dir, filename)
+
+#     print(f"DEBUG: Looking for file at -> {abs_path}")
+
+#     if os.path.exists(abs_path):
+#         return abs_path
+#     # 3. Check if it's a full URL containing /media/
+#     if "/media/" in url_or_path:
+#         relative_part = url_or_path.split("/media/")[-1]
+#         abs_path = os.path.abspath(os.path.join("media", relative_part))
+#         print(f"DEBUG: Checking file at -> {abs_path}")
+#         if os.path.exists(abs_path):
+#             return abs_path
+
+#     print(f"❌ FILE NOT FOUND: {filename} is missing in {base_dir}")
+#     return None
 
 
 def render_preview(template: dict, output_path: str):

@@ -139,7 +139,9 @@ async def preview_template(template_id: str):
     media_dir = os.path.abspath("media")
     os.makedirs(media_dir, exist_ok=True)
     preview_filename = f"{template_id}_preview.mp4"
+    print("Preview Of Filename is",preview_filename)
     preview_path = os.path.join(media_dir, preview_filename)
+    print("Preview path is is",preview_filename)
 
     try:
         # 3. Render preview in thread pool
@@ -201,7 +203,7 @@ def replace_placeholders(template_json: dict, customer: dict) -> dict:
     return json.loads(template_str)
     
 @router.post("/{template_id}/preview/{customer_id}")
-async def preview_template(template_id: str, customer_id: str):
+async def preview_template_customer(template_id: str, customer_id: str):
 
     template = await db.templates.find_one({"_id": ObjectId(template_id)})
     if not template:
