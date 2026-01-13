@@ -51,15 +51,13 @@ def ensure_list(val):
 
 if DEBUG:
     # Windows Local
+    # ESCAPING FIX: The colon in C:/ must be escaped as C\:/ for FFmpeg filters
+    FONT = "C:/Windows/Fonts/arial.ttf".replace(":", "\\:")
     FFMPEG = r"C:\ffmpeg-2025-12-28-git-9ab2a437a1-full_build\bin\ffmpeg.exe"
 else:
     # Docker / Linux Server
-    FFMPEG = "ffmpeg"
-
-if DEBUG:
-    FONT = "C:/Windows/Fonts/arial.ttf"
-else:
     FONT = "/usr/share/fonts/truetype/custom/Arial.ttf"
+    FFMPEG = "ffmpeg" 
 
 
 def download_file_from_url(url: str, base_dir: str) -> str | None:
@@ -195,11 +193,41 @@ def render_preview(template: dict, output_path: str):
     # Process all items to collect unique media files
     media_files = {}  # Maps src -> input_index
     
+    # Get Base Video URL
+    base_video_url = template.get("base_video_url")
+    base_image_url = template.get("base_image_url")
+    base_audio_url = template.get("base_audio_url")
+
+    def ensure_string_url(val):
+        if isinstance(val, list) and len(val) > 0:
+            return val[0]
+        if isinstance(val, str):
+            return val
+        return None
+
     for item_id, item in track_items_map.items():
         item_type = item.get("type")
+        print(f"DEBUG: Processing item {item_id} of type {item_type}")
         if item_type in ["video", "image", "audio"]:
             details = item.get("details", {})
             src = details.get("src")
+            # Ensure src is a string if it's a list
+            src = ensure_string_url(src)
+            
+            print(f"DEBUG: Item {item_id} src: '{src}'")
+            
+            # FALLBACK LOGIC
+            if not src:
+                if item_type == "video" and base_video_url:
+                    print(f"DEBUG: Using base_video_url fallback for item {item_id}")
+                    src = ensure_string_url(base_video_url)
+                elif item_type == "image" and base_image_url:
+                    print(f"DEBUG: Using base_image_url fallback for item {item_id}")
+                    src = ensure_string_url(base_image_url)
+                elif item_type == "audio" and base_audio_url:
+                    print(f"DEBUG: Using base_audio_url fallback for item {item_id}")
+                    src = ensure_string_url(base_audio_url)
+            
             if src:
                 if src not in media_files:
                     media_files[src] = input_index
@@ -682,6 +710,7 @@ def render_preview(template: dict, output_path: str):
     cmd += ["-map", current_node]
     cmd += ["-map", final_audio]
     
+
     cmd += [
         "-c:v", "libx264",
         "-preset", "medium",
@@ -696,7 +725,19 @@ def render_preview(template: dict, output_path: str):
     print("DEBUG: Executing FFmpeg command...")
     print(f"Filter complex length: {len(filter_complex)} chars")
     
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+    # 🔧 Prepare environment for FFmpeg subprocess
+    # On Windows, disable fontconfig to avoid "Cannot load default config file" error
+    env = os.environ.copy()
+    if DEBUG:
+        env['FONTCONFIG_FILE'] = ''
+        env['FONTCONFIG_PATH'] = ''
+    
+    # DEBUG LOGGING
+    print("DEBUG: Full FFmpeg command:")
+    print(" ".join(f'"{c}"' if " " in str(c) else str(c) for c in cmd))
+    print(f"DEBUG: Font Config Env: FILE='{env.get('FONTCONFIG_FILE')}', PATH='{env.get('FONTCONFIG_PATH')}'")
+
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', env=env)
     
     if result.returncode != 0:
         print("FFMPEG ERROR:", result.stderr)

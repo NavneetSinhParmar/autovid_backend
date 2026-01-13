@@ -154,6 +154,8 @@ async def preview_template(template_id: str):
             filename=preview_filename
         )
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 PLACEHOLDER_PATTERN = re.compile(r"{{\s*([^}]+)\s*}}")
