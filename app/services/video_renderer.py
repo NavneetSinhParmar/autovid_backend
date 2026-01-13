@@ -2,6 +2,9 @@ import subprocess
 import os
 import uuid
 import re
+import urllib.parse
+import requests
+import hashlib
 
 import json
 from bson import ObjectId
@@ -59,6 +62,51 @@ else:
     FONT = "/usr/share/fonts/truetype/custom/Arial.ttf"
 
 
+def download_file_from_url(url: str, base_dir: str) -> str | None:
+    """
+    Download a file from URL and save it locally in the media directory.
+    Returns the local path if successful, None otherwise.
+    """
+    try:
+        # Create a cache directory for downloaded files
+        cache_dir = os.path.join(base_dir, "_downloaded_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        
+        # Generate a unique filename based on URL hash
+        url_hash = hashlib.md5(url.encode()).hexdigest()
+        
+        # Try to extract original filename from URL
+        parsed_url = urllib.parse.urlparse(url)
+        original_filename = os.path.basename(parsed_url.path)
+        decoded_filename = urllib.parse.unquote(original_filename)
+        
+        # Create local filename: hash_originalname
+        local_filename = f"{url_hash}_{decoded_filename}"
+        local_path = os.path.join(cache_dir, local_filename)
+        
+        # If already downloaded, return cached path
+        if os.path.exists(local_path):
+            print(f"✓ Using cached file: {local_path}")
+            return local_path
+        
+        # Download the file
+        print(f"⬇️ Downloading missing file from: {url}")
+        response = requests.get(url, timeout=30, stream=True)
+        response.raise_for_status()
+        
+        # Save to disk
+        with open(local_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        print(f"✓ Downloaded successfully to: {local_path}")
+        return local_path
+        
+    except Exception as e:
+        print(f"❌ Failed to download file from {url}: {str(e)}")
+        return None
+
+
 def to_local_path(url_or_path):
     if not url_or_path:
         return None
@@ -72,7 +120,8 @@ def to_local_path(url_or_path):
     # If URL contains '/media/' use the part after it as relative path
     if "/media/" in url_or_path:
         relative_part = url_or_path.split("/media/")[-1]
-        abs_path = os.path.join(base_dir, *relative_part.split("/"))
+        decoded_part = urllib.parse.unquote(relative_part)
+        abs_path = os.path.join(base_dir, *decoded_part.split("/"))
         print(f"DEBUG: Checking file at -> {abs_path}")
         if os.path.exists(abs_path):
             return abs_path
@@ -80,26 +129,41 @@ def to_local_path(url_or_path):
     # If path starts with 'media/' or './media/' handle that
     if url_or_path.startswith("media/") or url_or_path.startswith("./media/") or url_or_path.startswith("media\\"):
         rel = url_or_path.split("media/", 1)[-1] if "media/" in url_or_path else url_or_path.split("media\\", 1)[-1]
-        abs_path = os.path.join(base_dir, *rel.split("/"))
+        decoded_rel = urllib.parse.unquote(rel)
+        abs_path = os.path.join(base_dir, *decoded_rel.split("/"))
         print(f"DEBUG: Checking file at -> {abs_path}")
         if os.path.exists(abs_path):
             return abs_path
 
     # Fall back to searching by filename in media folder (recursively)
     filename = url_or_path.split("/")[-1].split("\\")[-1]
-    abs_path = os.path.join(base_dir, filename)
+    decoded_filename = urllib.parse.unquote(filename)
+    abs_path = os.path.join(base_dir, decoded_filename)
     print(f"DEBUG: Looking for file at -> {abs_path}")
     if os.path.exists(abs_path):
         return abs_path
 
     # Search recursively for the filename inside media directory
     for root, dirs, files in os.walk(base_dir):
-        if filename in files:
-            found = os.path.join(root, filename)
+        if decoded_filename in files:
+            found = os.path.join(root, decoded_filename)
             print(f"DEBUG: Found file in nested folder -> {found}")
             return found
 
-    print(f"❌ FILE NOT FOUND: {filename} is missing in {base_dir}")
+    print(f"❌ FILE NOT FOUND: {decoded_filename} is missing in {base_dir}")
+    print(f"   (Original URL: {url_or_path})")
+    
+    # Helpful hint for debugging
+    if not os.path.exists(base_dir):
+         print(f"   CRITICAL: The media directory itself does not exist at {base_dir}")
+    
+    # 🔥 FALLBACK: Try to download from URL if it looks like a valid HTTP(S) URL
+    if url_or_path.startswith("http://") or url_or_path.startswith("https://"):
+        print(f"🔄 Attempting to download file from URL...")
+        downloaded_path = download_file_from_url(url_or_path, base_dir)
+        if downloaded_path:
+            return downloaded_path
+    
     return None
 
 
