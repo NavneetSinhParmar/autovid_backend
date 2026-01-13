@@ -107,6 +107,7 @@ def render_preview(template: dict, output_path: str):
         if item_type in ["video", "image", "audio"]:
             details = item.get("details", {})
             src = details.get("src")
+            print(f"Processing item {item_id} of type {item_type} with src: {src}")
             if src:
                 if src not in media_files:
                     media_files[src] = input_index
@@ -171,6 +172,7 @@ def render_preview(template: dict, output_path: str):
     node_counter = 0
     
     if base_video_item:
+        print("Using base video for background.",base_video_item)
         # Use first video as base
         display = base_video_item.get("display", {})
         trim_info = base_video_item.get("trim", {})
