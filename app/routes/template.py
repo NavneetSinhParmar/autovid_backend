@@ -172,21 +172,6 @@ def get_nested_value(data: dict, path: str):
     except Exception:
         return ""
 
-# def replace_placeholders(template_json: dict, customer: dict) -> dict:
-#     """
-#     Replaces {{field}} and {{nested.field}} placeholders
-#     using customer JSON
-#     """
-#     template_str = json.dumps(template_json)
-
-#     def replacer(match):
-#         key_path = match.group(1)  # e.g. user.email
-#         return get_nested_value(customer, key_path)
-
-#     template_str = PLACEHOLDER_PATTERN.sub(replacer, template_str)
-
-#     return json.loads(template_str)
-
 def replace_placeholders(template_json: dict, customer: dict) -> dict:
     template_str = json.dumps(template_json)
 

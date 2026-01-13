@@ -51,15 +51,12 @@ async def get_categories(user=Depends(require_roles("superadmin", "company"))):
     return categories
 
 @router.get("/{category_id}", response_model=CategoryOut)
-async def get_category(category_id: str,user=Depends(require_roles("superadmin", "company"))):
-
-    category = await db.categories.find_one(
-        {"_id": ObjectId(category_id)}
-    )
-
+async def get_category(category_id: str, user=Depends(require_roles("superadmin", "company"))):
+    if not ObjectId.is_valid(category_id):
+        raise HTTPException(status_code=400, detail="Invalid category id")
+    category = await db.categories.find_one({"_id": ObjectId(category_id)})
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
-
     return {
         "id": str(category["_id"]),
         **category
@@ -67,24 +64,17 @@ async def get_category(category_id: str,user=Depends(require_roles("superadmin",
 
 
 @router.patch("/{category_id}", response_model=CategoryOut)
-async def update_category(category_id: str, payload: CategoryUpdate,user=Depends(require_roles("superadmin", "company"))):
-
+async def update_category(category_id: str, payload: CategoryUpdate, user=Depends(require_roles("superadmin", "company"))):
+    if not ObjectId.is_valid(category_id):
+        raise HTTPException(status_code=400, detail="Invalid category id")
     update_data = {k: v for k, v in payload.dict().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="Nothing to update")
-
     update_data["updated_at"] = datetime.utcnow()
-
-    result = await db.categories.update_one(
-        {"_id": ObjectId(category_id)},
-        {"$set": update_data}
-    )
-
+    result = await db.categories.update_one({"_id": ObjectId(category_id)}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Category not found")
-
     category = await db.categories.find_one({"_id": ObjectId(category_id)})
-
     return {
         "id": str(category["_id"]),
         **category
@@ -92,13 +82,12 @@ async def update_category(category_id: str, payload: CategoryUpdate,user=Depends
 
 @router.delete("/{category_id}")
 async def delete_category(
-    category_id: str,user=Depends(require_roles("superadmin", "company"))
+    category_id: str, user=Depends(require_roles("superadmin", "company"))
 ):
+    if not ObjectId.is_valid(category_id):
+        raise HTTPException(status_code=400, detail="Invalid category id")
     query = {"_id": ObjectId(category_id)}
-
     result = await db.categories.delete_one(query)
-
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Category not found")
-
     return {"message": "Category deleted"}

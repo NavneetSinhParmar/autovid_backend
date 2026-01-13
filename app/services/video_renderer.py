@@ -62,24 +62,42 @@ else:
 def to_local_path(url_or_path):
     if not url_or_path:
         return None
-    # 1. Extract filename from URL or path
-    filename = url_or_path.split("/")[-1]
+    # Try absolute path first
+    if os.path.isabs(url_or_path) and os.path.exists(url_or_path):
+        return url_or_path
 
-    # 2. Construct absolute path in media directory
+    # Build media base directory
     base_dir = os.path.abspath("media")
-    abs_path = os.path.join(base_dir, filename)
 
-    print(f"DEBUG: Looking for file at -> {abs_path}")
-
-    if os.path.exists(abs_path):
-        return abs_path
-    # 3. Check if it's a full URL containing /media/
+    # If URL contains '/media/' use the part after it as relative path
     if "/media/" in url_or_path:
         relative_part = url_or_path.split("/media/")[-1]
-        abs_path = os.path.abspath(os.path.join("media", relative_part))
+        abs_path = os.path.join(base_dir, *relative_part.split("/"))
         print(f"DEBUG: Checking file at -> {abs_path}")
         if os.path.exists(abs_path):
             return abs_path
+
+    # If path starts with 'media/' or './media/' handle that
+    if url_or_path.startswith("media/") or url_or_path.startswith("./media/") or url_or_path.startswith("media\\"):
+        rel = url_or_path.split("media/", 1)[-1] if "media/" in url_or_path else url_or_path.split("media\\", 1)[-1]
+        abs_path = os.path.join(base_dir, *rel.split("/"))
+        print(f"DEBUG: Checking file at -> {abs_path}")
+        if os.path.exists(abs_path):
+            return abs_path
+
+    # Fall back to searching by filename in media folder (recursively)
+    filename = url_or_path.split("/")[-1].split("\\")[-1]
+    abs_path = os.path.join(base_dir, filename)
+    print(f"DEBUG: Looking for file at -> {abs_path}")
+    if os.path.exists(abs_path):
+        return abs_path
+
+    # Search recursively for the filename inside media directory
+    for root, dirs, files in os.walk(base_dir):
+        if filename in files:
+            found = os.path.join(root, filename)
+            print(f"DEBUG: Found file in nested folder -> {found}")
+            return found
 
     print(f"❌ FILE NOT FOUND: {filename} is missing in {base_dir}")
     return None
