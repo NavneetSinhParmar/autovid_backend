@@ -82,9 +82,9 @@ def generate_filter_complex(
         f"[0:v]scale={canvas_w}:{canvas_h},setsar=1[base]"
     )
     # ---------- BASE ----------
-    filters.append(
-        f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]"
-    )
+    # filters.append(
+    #     f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]"
+    # )
     
 
     input_index = 0
