@@ -35,15 +35,21 @@ def render_video(task_id: str):
 # UTILS
 # ---------------------------------------------------------
 
-def abs_media_path(path: str) -> str:
+def abs_media_path(path):
     """
-    Converts:
-      ./media/xxx.mp4
-      media/xxx.mp4
-      /media/xxx.mp4
-    into:
-      /app/media/xxx.mp4
+    Accepts:
+    - str
+    - list[str]
+    Returns:
+    - str OR list[str]
     """
+
+    if isinstance(path, list):
+        return [abs_media_path(p) for p in path]
+
+    if not isinstance(path, str):
+        raise TypeError(f"Invalid media path type: {type(path)}")
+
     if path.startswith("/app/media"):
         return path
 
@@ -53,7 +59,6 @@ def abs_media_path(path: str) -> str:
     path = path.lstrip("/")
 
     return os.path.join(MEDIA_ROOT, path)
-
 
 def ensure_file_exists(path: str):
     if not os.path.exists(path):
@@ -72,11 +77,15 @@ def generate_filter_complex(
 ):
     filters: List[str] = []
     input_files: List[str] = []
-
+    base_video_index = 0
+    filters.append(
+        f"[0:v]scale={canvas_w}:{canvas_h},setsar=1[base]"
+    )
     # ---------- BASE ----------
     filters.append(
         f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]"
     )
+    
 
     input_index = 0
     last_video_label = "[base]"
@@ -199,14 +208,25 @@ def render_preview(
     cmd = ["ffmpeg", "-y"]
 
     # ---------- BASE VIDEO ----------
+    base_video_inputs = []
+
     if base_video_url:
-        base_video_path = abs_media_path(base_video_url)
-        ensure_file_exists(base_video_path)
-        cmd += ["-i", base_video_path]
-        base_video_index = 0
-    else:
-        cmd += ["-f", "lavfi", "-i", f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}"]
-        base_video_index = 0
+        base_video_paths = abs_media_path(base_video_url)
+
+        if isinstance(base_video_paths, list):
+            for p in base_video_paths:
+                ensure_file_exists(p)
+                base_video_inputs.append(p)
+        else:
+            ensure_file_exists(base_video_paths)
+            base_video_inputs.append(base_video_paths)
+
+    # FFmpeg inputs
+    for p in base_video_inputs:
+        cmd += ["-i", p]
+
+    base_video_count = len(base_video_inputs)
+
 
     # ---------- BASE AUDIO ----------
     if base_audio_url:
