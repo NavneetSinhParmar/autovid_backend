@@ -17,6 +17,7 @@ import json
 from bson import ObjectId 
 from app.db.connection import db 
 DEBUG = os.getenv("DEBUG", "False").lower() == "true" 
+
 def render_video(task_id: str): 
     task = db.video_tasks.find_one({"_id": ObjectId(task_id)}) 
     template = db.templates.find_one({"_id": ObjectId(task["template_id"])}) 
@@ -35,21 +36,7 @@ def render_video(task_id: str):
 # UTILS
 # ---------------------------------------------------------
 
-def abs_media_path(path):
-    """
-    Accepts:
-    - str
-    - list[str]
-    Returns:
-    - str OR list[str]
-    """
-
-    if isinstance(path, list):
-        return [abs_media_path(p) for p in path]
-
-    if not isinstance(path, str):
-        raise TypeError(f"Invalid media path type: {type(path)}")
-
+def abs_media_path(path: str) -> str:
     if path.startswith("/app/media"):
         return path
 
@@ -69,31 +56,22 @@ def ensure_file_exists(path: str):
 # FILTER COMPLEX GENERATOR (SAFE)
 # ---------------------------------------------------------
 
-def generate_filter_complex(
-    template: Dict[str, Any],
-    canvas_w: int,
-    canvas_h: int,
-    duration: float
-):
-    filters: List[str] = []
-    input_files: List[str] = []
-    base_video_index = 0
+def generate_filter_complex(template, canvas_w, canvas_h, duration):
+    filters = []
+    input_files = []
+
+    # BASE CANVAS
     filters.append(
-        f"[0:v]scale={canvas_w}:{canvas_h},setsar=1[base]"
+        f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]"
     )
-    # ---------- BASE ----------
-    # filters.append(
-    #     f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]"
-    # )
-    
 
+    last_video = "[base]"
     input_index = 0
-    last_video_label = "[base]"
 
-    track_items = template.get("trackItemsMap", {})
+    track_items = template.get("template_json", {}).get("trackItemsMap", {})
 
     for _, item in track_items.items():
-        item_type = item.get("type")
+        item_type = item["type"]
         display = item.get("display", {})
         details = item.get("details", {})
 
@@ -101,181 +79,96 @@ def generate_filter_complex(
         end = float(display.get("to", duration))
         dur = max(0.01, end - start)
 
-        src = details.get("src")
-        if not src:
-            continue
-
-        src_path = abs_media_path(src)
-        ensure_file_exists(src_path)
-
-        input_files.append(src_path)
-        idx = input_index
-        input_index += 1
-
         x = int(details.get("left", 0))
         y = int(details.get("top", 0))
 
-        # ---------- VIDEO ----------
+        # ---------------- VIDEO ----------------
         if item_type == "video":
-            vlabel = f"[v{idx}]"
+            src = abs_media_path(details["src"])
+            input_files.append(src)
+            idx = input_index
+            input_index += 1
 
             filters.append(
-                f"[{idx}:v]"
-                f"scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=decrease,"
+                f"[{idx}:v]scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=decrease,"
                 f"pad={canvas_w}:{canvas_h}:(ow-iw)/2:(oh-ih)/2:black,"
-                f"trim=duration={dur},setpts=PTS-STARTPTS"
-                f"{vlabel}"
+                f"trim=duration={dur},setpts=PTS-STARTPTS[v{idx}]"
             )
 
             filters.append(
-                f"{last_video_label}{vlabel}"
-                f"overlay={x}:{y}:enable='between(t,{start},{end})'"
-                f"[base]"
+                f"{last_video}[v{idx}]overlay={x}:{y}:enable='between(t,{start},{end})'[base]"
             )
 
-            last_video_label = "[base]"
-
-        # ---------- IMAGE ----------
+        # ---------------- IMAGE ----------------
         elif item_type == "image":
-            ilabel = f"[img{idx}]"
+            src = abs_media_path(details["src"])
+            input_files.append(src)
+            idx = input_index
+            input_index += 1
 
             filters.append(
-                f"[{idx}:v]"
-                f"scale='min(iw,{canvas_w})':'min(ih,{canvas_h})',"
-                f"setsar=1,"
-                f"tpad=stop_mode=clone:stop_duration={dur},"
-                f"format=rgba"
-                f"{ilabel}"
+                f"[{idx}:v]scale='min(iw,{canvas_w})':'min(ih,{canvas_h})',"
+                f"setsar=1,tpad=stop_duration={dur}[img{idx}]"
             )
 
             filters.append(
-                f"{last_video_label}{ilabel}"
-                f"overlay={x}:{y}:enable='between(t,{start},{end})'"
-                f"[base]"
+                f"{last_video}[img{idx}]overlay={x}:{y}:enable='between(t,{start},{end})'[base]"
             )
 
-            last_video_label = "[base]"
-
-        # ---------- TEXT ----------
+        # ---------------- TEXT ----------------
         elif item_type == "text":
             text = details.get("text", "")
             size = int(details.get("fontSize", 48))
             color = details.get("color", "#ffffff")
 
             filters.append(
-                f"{last_video_label}"
-                f"drawtext=fontfile='{FONT_PATH}':"
-                f"text='{text}':"
-                f"x={x}:y={y}:"
-                f"fontsize={size}:"
-                f"fontcolor={color}:"
-                f"enable='between(t,{start},{end})'"
-                f"[base]"
+                f"{last_video}drawtext=text='{text}':"
+                f"x={x}:y={y}:fontsize={size}:fontcolor={color}:"
+                f"enable='between(t,{start},{end})'[base]"
             )
 
-            last_video_label = "[base]"
-
-        # ---------- AUDIO ----------
+        # ---------------- AUDIO ----------------
         elif item_type == "audio":
-            alabel = f"[a{idx}]"
-
-            filters.append(
-                f"[{idx}:a]"
-                f"atrim=duration={duration},"
-                f"asetpts=PTS-STARTPTS"
-                f"{alabel}"
-            )
+            src = abs_media_path(details["src"])
+            input_files.append(src)
 
     return ";".join(filters), input_files
-
 
 # ---------------------------------------------------------
 # MAIN RENDER FUNCTION
 # ---------------------------------------------------------
 
-def render_preview(
-    template: Dict[str, Any],
-    output_path: str
-):
-    canvas = template.get("canvas", {})
+def render_preview(template: dict, output_path: str):
+    canvas = template.get("template_json", {}).get("canvas", {})
     canvas_w = int(canvas.get("width", 1920))
     canvas_h = int(canvas.get("height", 1080))
     duration = float(template.get("duration", 5))
 
-    base_video_url = template.get("base_video_url")
-    base_audio_url = template.get("base_audio_url")
-
     cmd = ["ffmpeg", "-y"]
 
-    # ---------- BASE VIDEO ----------
-    base_video_inputs = []
-
-    if base_video_url:
-        base_video_paths = abs_media_path(base_video_url)
-
-        if isinstance(base_video_paths, list):
-            for p in base_video_paths:
-                ensure_file_exists(p)
-                base_video_inputs.append(p)
-        else:
-            ensure_file_exists(base_video_paths)
-            base_video_inputs.append(base_video_paths)
-
-    # FFmpeg inputs
-    for p in base_video_inputs:
-        cmd += ["-i", p]
-
-    base_video_count = len(base_video_inputs)
-
-
-    # ---------- BASE AUDIO ----------
-    if base_audio_url:
-        base_audio_path = abs_media_path(base_audio_url)
-        ensure_file_exists(base_audio_path)
-        cmd += ["-i", base_audio_path]
-
-    # ---------- FILTER COMPLEX ----------
-    filter_complex, overlay_inputs = generate_filter_complex(
-        template,
-        canvas_w,
-        canvas_h,
-        duration
+    filter_complex, inputs = generate_filter_complex(
+        template, canvas_w, canvas_h, duration
     )
 
-    for f in overlay_inputs:
+    for f in inputs:
         cmd += ["-i", f]
 
     cmd += [
         "-filter_complex", filter_complex,
         "-map", "[base]",
-    ]
-
-    if base_audio_url:
-        cmd += ["-map", "1:a"]
-
-    cmd += [
         "-c:v", "libx264",
-        "-preset", "medium",
         "-pix_fmt", "yuv420p",
         "-r", "30",
         "-movflags", "+faststart",
-        "-threads", "2",
         "-t", str(duration),
         output_path
     ]
 
-    print("FFMPEG CMD:\n", " ".join(shlex.quote(x) for x in cmd))
+    print("FFMPEG CMD:\n", " ".join(cmd))
 
-    result = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
-    )
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     if result.returncode != 0:
-        raise Exception(
-            f"FFmpeg failed ({result.returncode}):\n{result.stderr[:1500]}"
-        )
+        raise Exception(result.stderr)
 
     return output_path
