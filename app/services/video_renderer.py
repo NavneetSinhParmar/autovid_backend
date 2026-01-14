@@ -2,12 +2,6 @@ import os
 import subprocess
 import shlex
 from typing import Dict, Any, List
-
-
-MEDIA_ROOT = os.getenv("MEDIA_ROOT", "./media")
-
-FONT_PATH = "/usr/share/fonts/truetype/custom/Arial.ttf"
-
 import uuid 
 import re 
 import urllib.parse 
@@ -16,6 +10,12 @@ import hashlib
 import json 
 from bson import ObjectId 
 from app.db.connection import db 
+
+
+MEDIA_ROOT = os.getenv("MEDIA_ROOT", "./media")
+
+FONT_PATH = "/usr/share/fonts/truetype/custom/Arial.ttf"
+
 DEBUG = os.getenv("DEBUG", "False").lower() == "true" 
 
 def render_video(task_id: str): 
@@ -37,6 +37,7 @@ def render_video(task_id: str):
 # ---------------------------------------------------------
 
 def abs_media_path(path: str) -> str:
+    print("abs_media_path input:", path)  # 🔹 debug
     if path.startswith("/app/media"):
         return path
 
@@ -45,7 +46,9 @@ def abs_media_path(path: str) -> str:
     path = path.replace("media/", "")
     path = path.lstrip("/")
 
-    return os.path.join(MEDIA_ROOT, path)
+    full_path = os.path.join(MEDIA_ROOT, path)
+    print("abs_media_path resolved:", full_path)  # 🔹 debug
+    return full_path
 
 def ensure_file_exists(path: str):
     if not os.path.exists(path):
@@ -55,107 +58,155 @@ def ensure_file_exists(path: str):
 # ---------------------------------------------------------
 # FILTER COMPLEX GENERATOR (SAFE)
 # ---------------------------------------------------------
+def px_to_int(value, default=0):
+    """
+    Converts '123px' or '123.45px' or int/float to int
+    """
+    if value is None:
+        return default
+
+    if isinstance(value, (int, float)):
+        return int(value)
+
+    if isinstance(value, str):
+        value = value.replace("px", "").strip()
+        try:
+            return int(float(value))
+        except ValueError:
+            return default
+
+    return default
+
+
+PX_RE = re.compile(r"-?\d+(\.\d+)?")
+
+def parse_px(val, default=0):
+    if val is None:
+        return default
+    if isinstance(val, (int, float)):
+        return int(val)
+    m = PX_RE.search(str(val))
+    return int(float(m.group())) if m else default
+
 
 def generate_filter_complex(template, canvas_w, canvas_h, duration):
+    print("___________________Inside Filter Complex___________________")
+
     filters = []
     input_files = []
 
-    # BASE CANVAS
+    # base canvas
     filters.append(
         f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]"
     )
-
     last_video = "[base]"
-    input_index = 0
+    input_idx = 0
+    audio_idx = None
 
-    track_items = template.get("template_json", {}).get("trackItemsMap", {})
+    track_items = template.get("template_json", {}).get("design", {}).get("trackItemsMap", {})
+    print("Track Items Count:", len(track_items))
 
-    for _, item in track_items.items():
-        item_type = item["type"]
-        display = item.get("display", {})
+    for item_id, item in track_items.items():
+        item_type = item.get("type")
         details = item.get("details", {})
+        display = item.get("display", {})
 
-        start = float(display.get("from", 0))
-        end = float(display.get("to", duration))
-        dur = max(0.01, end - start)
+        src = details.get("src")
+        print(f"ITEM: {item_id} TYPE: {item_type} SRC: {src}")
 
-        x = int(details.get("left", 0))
-        y = int(details.get("top", 0))
+        start = (display.get("from", 0)) / 1000
+        end = (display.get("to", duration * 1000)) / 1000
 
-        # ---------------- VIDEO ----------------
-        if item_type == "video":
-            src = abs_media_path(details["src"])
-            input_files.append(src)
-            idx = input_index
-            input_index += 1
+        x = parse_px(details.get("left", 0))
+        y = parse_px(details.get("top", 0))
 
+        if item_type in ("video", "image") and src:
+            abs_path = os.path.abspath(src)
+            print("Resolved path:", abs_path)
+
+            if not os.path.exists(abs_path):
+                print("❌ FILE NOT FOUND:", abs_path)
+                continue
+
+            input_files.append(abs_path)
+
+            # scale
+            if item_type == "video":
+                filters.append(
+                    f"[{input_idx}:v]scale={canvas_w}:{canvas_h}[v{input_idx}]"
+                )
+            else:
+                filters.append(
+                    f"[{input_idx}:v]scale=iw:ih[v{input_idx}]"
+                )
+
+            # overlay
             filters.append(
-                f"[{idx}:v]scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=decrease,"
-                f"pad={canvas_w}:{canvas_h}:(ow-iw)/2:(oh-ih)/2:black,"
-                f"trim=duration={dur},setpts=PTS-STARTPTS[v{idx}]"
+                f"{last_video}[v{input_idx}]overlay={x}:{y}:enable='between(t,{start},{end})'[out{input_idx}]"
             )
 
-            filters.append(
-                f"{last_video}[v{idx}]overlay={x}:{y}:enable='between(t,{start},{end})'[base]"
-            )
+            last_video = f"[out{input_idx}]"
+            input_idx += 1
 
-        # ---------------- IMAGE ----------------
-        elif item_type == "image":
-            src = abs_media_path(details["src"])
-            input_files.append(src)
-            idx = input_index
-            input_index += 1
+        elif item_type == "audio" and src:
+            abs_path = os.path.abspath(src)
+            print("Resolved audio:", abs_path)
 
-            filters.append(
-                f"[{idx}:v]scale='min(iw,{canvas_w})':'min(ih,{canvas_h})',"
-                f"setsar=1,tpad=stop_duration={dur}[img{idx}]"
-            )
+            if not os.path.exists(abs_path):
+                print("❌ AUDIO NOT FOUND:", abs_path)
+                continue
 
-            filters.append(
-                f"{last_video}[img{idx}]overlay={x}:{y}:enable='between(t,{start},{end})'[base]"
-            )
+            input_files.append(abs_path)
+            audio_idx = input_idx
+            input_idx += 1
 
-        # ---------------- TEXT ----------------
         elif item_type == "text":
-            text = details.get("text", "")
-            size = int(details.get("fontSize", 48))
-            color = details.get("color", "#ffffff")
+            print("📝 TEXT FOUND (not rendered yet):", details.get("text"))
 
-            filters.append(
-                f"{last_video}drawtext=text='{text}':"
-                f"x={x}:y={y}:fontsize={size}:fontcolor={color}:"
-                f"enable='between(t,{start},{end})'[base]"
-            )
+    filter_complex = ";".join(filters)
 
-        # ---------------- AUDIO ----------------
-        elif item_type == "audio":
-            src = abs_media_path(details["src"])
-            input_files.append(src)
+    print("\nInput files:")
+    for f in input_files:
+        print(" ", f)
 
-    return ";".join(filters), input_files
+    print("\nFILTER_COMPLEX:\n", filter_complex)
+
+    return filter_complex, input_files, last_video, audio_idx
 
 # ---------------------------------------------------------
 # MAIN RENDER FUNCTION
 # ---------------------------------------------------------
 
-def render_preview(template: dict, output_path: str):
-    canvas = template.get("template_json", {}).get("canvas", {})
-    canvas_w = int(canvas.get("width", 1920))
-    canvas_h = int(canvas.get("height", 1080))
-    duration = float(template.get("duration", 5))
+import subprocess
 
-    cmd = ["ffmpeg", "-y"]
+def render_preview(template, output_path):
+    design = template.get("template_json", {}).get("design", {})
+    size = design.get("size", {})
 
-    filter_complex, inputs = generate_filter_complex(
+    canvas_w = size.get("width", 1920)
+    canvas_h = size.get("height", 1080)
+    duration = template.get("duration", 5)
+
+    print(f"Canvas: {canvas_w} x {canvas_h} Duration: {duration}")
+
+    filter_complex, input_files, last_video, audio_idx = generate_filter_complex(
         template, canvas_w, canvas_h, duration
     )
 
-    for f in inputs:
+    cmd = ["ffmpeg", "-y"]
+
+    for f in input_files:
         cmd += ["-i", f]
 
     cmd += [
         "-filter_complex", filter_complex,
-        "-map", "[base]",
+        "-map", last_video,
+    ]
+
+    if audio_idx is not None:
+        cmd += ["-map", f"{audio_idx}:a"]
+
+    cmd += [
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
         "-r", "30",
@@ -164,11 +215,18 @@ def render_preview(template: dict, output_path: str):
         output_path
     ]
 
-    print("FFMPEG CMD:\n", " ".join(cmd))
+    print("\nFFMPEG CMD:\n", " ".join(cmd))
 
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    result = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
 
     if result.returncode != 0:
-        raise Exception(result.stderr)
+        print("❌ FFmpeg ERROR:")
+        print(result.stderr)
+        raise Exception("FFmpeg failed")
 
-    return output_path
+    print("✅ Render complete:", output_path)
