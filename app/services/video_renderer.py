@@ -4,7 +4,8 @@ import shlex
 from typing import Dict, Any, List
 
 
-MEDIA_ROOT = "/app/media"
+MEDIA_ROOT = os.getenv("MEDIA_ROOT", "./media")
+
 FONT_PATH = "/usr/share/fonts/truetype/custom/Arial.ttf"
 
 import uuid 
@@ -16,7 +17,6 @@ import json
 from bson import ObjectId 
 from app.db.connection import db 
 DEBUG = os.getenv("DEBUG", "False").lower() == "true" 
-MEDIA_ROOT = "media/generated" 
 def render_video(task_id: str): 
     task = db.video_tasks.find_one({"_id": ObjectId(task_id)}) 
     template = db.templates.find_one({"_id": ObjectId(task["template_id"])}) 
