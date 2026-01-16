@@ -260,10 +260,13 @@ def render_preview(template, output_path):
             # ---------------- VIDEO ----------------
             if track_type == "video":
                 src = details.get("src")
-                if not src:
+                abs_src = abs_media_path(src)
+                ensure_file_exists(abs_src)
+                input_files.append(abs_src)
+
+                if not abs_src:
                     continue
 
-                input_files.append(src)
                 idx = len(input_files) - 1
 
                 v_label = f"[v{v_count}]"
@@ -284,10 +287,13 @@ def render_preview(template, output_path):
             # ---------------- IMAGE ----------------
             elif track_type == "image":
                 src = details.get("src")
-                if not src:
+                abs_src = abs_media_path(src)
+                ensure_file_exists(abs_src)
+                input_files.append(abs_src)
+
+                if not abs_src:
                     continue
 
-                input_files.append(src)
                 idx = len(input_files) - 1
 
                 left = int(parse_px(details.get("left", 0)))
@@ -337,11 +343,13 @@ def render_preview(template, output_path):
             # ---------------- AUDIO ----------------
             elif track_type == "audio":
                 src = details.get("src")
-                if not src:
-                    continue
-
-                input_files.append(src)
+                abs_src = abs_media_path(src)
+                ensure_file_exists(abs_src)
+                input_files.append(abs_src)
                 audio_input_index = len(input_files) - 1
+
+                if not abs_src:
+                    continue
 
     # -------------------------------------------------
     # 3️⃣ BUILD FFMPEG COMMAND
