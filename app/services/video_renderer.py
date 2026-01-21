@@ -97,43 +97,6 @@ def ffmpeg_escape_text(text: str) -> str:
 # MAIN RENDER FUNCTION
 # ---------------------------------------------------------
 
-def render_video(task_id: str):
-    task = db.video_tasks.find_one({"_id": ObjectId(task_id)})
-    template = db.templates.find_one({"_id": ObjectId(task["template_id"])})
-    customer = db.customers.find_one({"_id": ObjectId(task["customer_id"])})
-
-    base_video = abs_media_path(template["base_video_url"])
-    ensure_file_exists(base_video)
-
-    text = customer["full_name"]
-
-    output_path = os.path.join(MEDIA_ROOT, f"{task_id}.mp4")
-
-    vf = (
-        f"drawtext="
-        f"fontfile={FONT_PATH}:"
-        f"text='{escape_text(text)}':"
-        f"x=200:y=300:"
-        f"fontsize=40:"
-        f"fontcolor=white"
-    )
-
-    cmd = [
-        FFMPEG,
-        "-y",
-        "-i", base_video,
-        "-vf", vf,
-        "-c:v", "libx264",
-        "-pix_fmt", "yuv420p",
-        output_path
-    ]
-
-    print("🎬 SIMPLE CMD:", " ".join(cmd))
-    subprocess.run(cmd, check=True)
-
-    return output_path
-
-
 def generate_ffmpeg_cmd(template):
     design = template['template_json']['design']
     track_map = design['trackItemsMap']
@@ -217,168 +180,125 @@ def generate_ffmpeg_cmd(template):
     return " ".join(shlex.quote(c) for c in cmd)
 
 def render_preview(template, output_path):
-    """
-    Render preview video from template_json (trackItemsMap based)
-    Supports: video, image, text, audio
-    """
-
     design = template.get("template_json", {}).get("design", {})
-    tracks = design.get("tracks", [])
     track_items_map = design.get("trackItemsMap", {})
+    tracks = design.get("tracks", [])
     duration = float(template.get("duration", 10))
 
     filter_parts = []
     input_files = []
+    
+    # 1. Base Layer
+    filter_parts.append(f"color=c=black:s=1920x1080:d={duration}[base];")
     last_label = "[base]"
-    audio_input_index = None
 
-    # counters
-    v_count = 0
-    img_count = 0
-    txt_count = 0
-
-    # -------------------------------------------------
-    # 1️⃣ BASE CANVAS
-    # -------------------------------------------------
-    filter_parts.append(
-        f"color=c=black:s=1920x1080:d={duration}[base];"
-    )
-
-    # -------------------------------------------------
-    # 2️⃣ PROCESS TRACKS (ORDER MATTERS)
-    # -------------------------------------------------
+    # --- PHASE 1: VIDEOS & IMAGES (Background Layers) ---
+    v_img_count = 0
     for track in tracks:
-        track_type = track.get("type")
-        for item_id in track.get("items", []):
-            item = track_items_map.get(item_id, {})
-            details = item.get("details", {})
-            display = item.get("display", {})
-
-            start = display.get("from", 0) / 1000
-            end = display.get("to", duration * 1000) / 1000
-
-            # ---------------- VIDEO ----------------
-            if track_type == "video":
-                src = details.get("src")
-                abs_src = abs_media_path(src)
+        if track["type"] in ["video", "image"]:
+            for item_id in track.get("items", []):
+                item = track_items_map.get(item_id, {})
+                details = item.get("details", {})
+                display = item.get("display", {})
+                
+                abs_src = abs_media_path(details.get("src"))
                 ensure_file_exists(abs_src)
                 input_files.append(abs_src)
-
-                if not abs_src:
-                    continue
-
+                
                 idx = len(input_files) - 1
-
-                v_label = f"[v{v_count}]"
-                o_label = f"[ov{v_count}]"
-
-                filter_parts.append(
-                    f"[{idx}:v]scale=1920:1080,setpts=PTS-STARTPTS{v_label};"
-                )
-                filter_parts.append(
-                    f"{last_label}{v_label}"
-                    f"overlay=0:0:enable='between(t,{start},{end})'"
-                    f"{o_label};"
-                )
-
+                start = display.get("from", 0) / 1000
+                end = display.get("to", duration * 1000) / 1000
+                
+                # Scale and Overlay
+                v_label = f"[v_layer{v_img_count}]"
+                o_label = f"[ov_layer{v_img_count}]"
+                
+                filter_parts.append(f"[{idx}:v]scale=1920:1080,setpts=PTS-STARTPTS{v_label};")
+                filter_parts.append(f"{last_label}{v_label}overlay=0:0:enable='between(t,{start},{end})'{o_label};")
+                
                 last_label = o_label
-                v_count += 1
+                v_img_count += 1
 
-            # ---------------- IMAGE ----------------
-            elif track_type == "image":
-                src = details.get("src")
-                abs_src = abs_media_path(src)
-                ensure_file_exists(abs_src)
-                input_files.append(abs_src)
-
-                if not abs_src:
-                    continue
-
-                idx = len(input_files) - 1
-
-                left = int(parse_px(details.get("left", 0)))
-                top = int(parse_px(details.get("top", 0)))
-
-                v_label = f"[img{img_count}]"
-                o_label = f"[oimg{img_count}]"
-
-                filter_parts.append(
-                    f"[{idx}:v]scale=iw:ih,setpts=PTS-STARTPTS{v_label};"
-                )
-                filter_parts.append(
-                    f"{last_label}{v_label}"
-                    f"overlay={left}:{top}:enable='between(t,{start},{end})'"
-                    f"{o_label};"
-                )
-
-                last_label = o_label
-                img_count += 1
-
-            # ---------------- TEXT ----------------
-            elif track_type == "text":
-                text = details.get("text", "")
-                text = ffmpeg_escape_text(text)
-
+    # --- PHASE 2: TEXT (Foreground Layer - Sabse upar) ---
+    txt_count = 0
+    for track in tracks:
+        if track["type"] == "text":
+            for item_id in track.get("items", []):
+                item = track_items_map.get(item_id, {})
+                details = item.get("details", {})
+                display = item.get("display", {})
+                
+                text = ffmpeg_escape_text(details.get("text", ""))
                 left = int(parse_px(details.get("left", 0)))
                 top = int(parse_px(details.get("top", 0)))
                 fontsize = int(details.get("fontSize", 48))
-
-                t_label = f"[txt{txt_count}]"
-
+                color = details.get("color", "#ffffff").replace("#", "0x")
+                start = display.get("from", 0) / 1000
+                end = display.get("to", duration * 1000) / 1000
+                
+                t_label = f"[out_txt{txt_count}]"
+                
                 filter_parts.append(
-                    f"{last_label}"
-                    f"drawtext="
-                    f"fontfile='{ffmpeg_escape_path(FONT_PATH)}':"
-                    f"text='{text}':"
-                    f"x={left}:y={top}:"
-                    f"fontsize={fontsize}:"
-                    f"fontcolor=white:"
-                    f"enable='between(t,{start},{end})'"
-                    f"{t_label};"
+                    f"{last_label}drawtext=fontfile='{ffmpeg_escape_path(FONT_PATH)}':"
+                    f"text='{text}':x={left}:y={top}:fontsize={fontsize}:fontcolor={color}:"
+                    f"enable='between(t,{start},{end})'{t_label};"
                 )
-
                 last_label = t_label
                 txt_count += 1
 
-            # ---------------- AUDIO ----------------
-            elif track_type == "audio":
-                src = details.get("src")
-                abs_src = abs_media_path(src)
-                ensure_file_exists(abs_src)
+    # --- PHASE 3: AUDIO ---
+    audio_idx = None
+    for track in tracks:
+        if track["type"] == "audio":
+            for item_id in track.get("items", []):
+                abs_src = abs_media_path(track_items_map[item_id]["details"]["src"])
                 input_files.append(abs_src)
-                audio_input_index = len(input_files) - 1
+                audio_idx = len(input_files) - 1
 
-                if not abs_src:
-                    continue
-
-    # -------------------------------------------------
-    # 3️⃣ BUILD FFMPEG COMMAND
-    # -------------------------------------------------
-    filter_complex = "".join(filter_parts).rstrip(";")
-
+    # Final Command Build
     cmd = ["ffmpeg", "-y"]
-
-    for f in input_files:
-        cmd += ["-i", f]
-
-    cmd += ["-filter_complex", filter_complex]
-
-    # 🎯 VERY IMPORTANT: MAP FINAL VIDEO
+    for f in input_files: cmd += ["-i", f]
+    cmd += ["-filter_complex", "".join(filter_parts).rstrip(";")]
     cmd += ["-map", last_label]
+    if audio_idx is not None: cmd += ["-map", f"{audio_idx}:a"]
+    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", "30", "-t", str(duration), output_path]
 
-    # 🎵 MAP AUDIO IF EXISTS
-    if audio_input_index is not None:
-        cmd += ["-map", f"{audio_input_index}:a"]
+    subprocess.run(cmd, check=True)
 
-    cmd += [
+    
+def render_video(task_id: str):
+    task = db.video_tasks.find_one({"_id": ObjectId(task_id)})
+    template = db.templates.find_one({"_id": ObjectId(task["template_id"])})
+    customer = db.customers.find_one({"_id": ObjectId(task["customer_id"])})
+
+    base_video = abs_media_path(template["base_video_url"])
+    ensure_file_exists(base_video)
+
+    text = customer["full_name"]
+
+    output_path = os.path.join(MEDIA_ROOT, f"{task_id}.mp4")
+
+    vf = (
+        f"drawtext="
+        f"fontfile={FONT_PATH}:"
+        f"text='{escape_text(text)}':"
+        f"x=200:y=300:"
+        f"fontsize=40:"
+        f"fontcolor=white"
+    )
+
+    cmd = [
+        FFMPEG,
+        "-y",
+        "-i", base_video,
+        "-vf", vf,
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
-        "-r", "30",
-        "-t", str(duration),
         output_path
     ]
 
-    print("\n🎬 FFMPEG CMD:\n", " ".join(cmd), "\n")
-
+    print("🎬 SIMPLE CMD:", " ".join(cmd))
     subprocess.run(cmd, check=True)
-    print("✅ Preview rendered successfully:", output_path)
+
+    return output_path
+
