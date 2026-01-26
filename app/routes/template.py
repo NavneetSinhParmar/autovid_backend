@@ -118,38 +118,76 @@ async def delete_template(template_id: str):
 
     return {"message": "Template deleted"}
 
-
 # ================= PREVIEW TEMPLATE =================
 @router.post("/{template_id}/preview")
 async def preview_template(template_id: str):
-
     template = await db.templates.find_one({"_id": ObjectId(template_id)})
     if not template:
-        raise HTTPException(status_code=404, detail="Template does not exist")
+        raise HTTPException(status_code=404, detail="Template Does not exist!")
 
+    # Fetch company name for watermarking
+    company_id = template.get("company_id")
+    company_name = "Our Company" # Default fallback
+    
+    if company_id:
+        company_data = await db.companies.find_one({"_id": ObjectId(company_id)})
+        if company_data:
+            company_name = company_data.get("company_name") or company_data.get("name") or "Our Company"
+
+    # 2. Prepare output path
     media_dir = os.path.abspath("media")
     os.makedirs(media_dir, exist_ok=True)
-
-    preview_filename = f"{template_id}_{uuid.uuid4().hex}_preview.mp4"
+    preview_filename = f"{template_id}_preview.mp4"
+    print("Preview Of Filename is",preview_filename)
     preview_path = os.path.join(media_dir, preview_filename)
+    print("Preview path is is",preview_filename)
 
     try:
-        await run_in_threadpool(
-            render_preview,
-            template["template_json"],
-            {},  # no customer
-            preview_path
-        )
-
+        # 3. Render preview in thread pool
+        await run_in_threadpool(render_preview, template, preview_path)
+        
+        # return {"status": "success", "preview_url": f"/media/{preview_filename}"}
         return FileResponse(
-            preview_path,
-            media_type="video/mp4",
+            path=preview_path, 
+            media_type="video/mp4", 
             filename=preview_filename
         )
-
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+PLACEHOLDER_PATTERN = re.compile(r"{{\s*([^}]+)\s*}}")
+def get_nested_value(data: dict, path: str):
+    """
+    Supports dot notation like:
+    user.email
+    company.company_name
+    """
+    try:
+        for key in path.split("."):
+            data = data.get(key)
+            if data is None:
+                return ""
+        return str(data)
+    except Exception:
+        return ""
+
+def replace_placeholders(template_json: dict, customer: dict) -> dict:
+    template_str = json.dumps(template_json)
+
+    replacements = {
+        "{{customer_company_name}}": customer.get("customer_company_name", ""),
+        "{{full_name}}": customer.get("full_name", ""),
+        "{{city}}": customer.get("city", ""),
+        "{{phone_number}}": customer.get("phone_number", "")
+    }
+
+    for key, value in replacements.items():
+        template_str = template_str.replace(key, value)
+
+    return json.loads(template_str)
+    
 @router.post("/{template_id}/preview/{customer_id}")
 async def preview_template_customer(template_id: str, customer_id: str):
 
@@ -158,31 +196,34 @@ async def preview_template_customer(template_id: str, customer_id: str):
         raise HTTPException(status_code=404, detail="Template does not exist")
 
     customer = await db.customers.find_one({"_id": ObjectId(customer_id)})
+    print("Customer data:", customer)
     if not customer:
         raise HTTPException(status_code=404, detail="Customer does not exist")
+
+    # 🔹 PLACEHOLDER REPLACEMENT
+    template["template_json"] = replace_placeholders(
+        template["template_json"],
+        customer
+    )
 
     media_dir = os.path.abspath("media")
     os.makedirs(media_dir, exist_ok=True)
 
-    preview_filename = f"{template_id}_{customer_id}_{uuid.uuid4().hex}.mp4"
+    preview_filename = f"{template_id}_{customer_id}_preview.mp4"
     preview_path = os.path.join(media_dir, preview_filename)
 
     try:
-        await run_in_threadpool(
-            render_preview,
-            template["template_json"],
-            customer,
-            preview_path
-        )
+        await run_in_threadpool(render_preview, template, preview_path)
 
         return FileResponse(
-            preview_path,
+            path=preview_path,
             media_type="video/mp4",
             filename=preview_filename
         )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/{template_id}/download/{customer_id}")
 async def download_video(template_id: str, customer_id: str):
