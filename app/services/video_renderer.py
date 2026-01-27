@@ -179,93 +179,127 @@ def generate_ffmpeg_cmd(template):
     # Return safe shell command
     return " ".join(shlex.quote(c) for c in cmd)
 
+import textwrap
+
+def wrap_text(text, width):
+    """FFmpeg doesn't wrap text, so we manually insert newlines."""
+    if not text: return ""
+    # 600px width par 120 fontsize ke liye approx 10-15 chars aate hain
+    # Aap isko calculate bhi kar sakte hain: (width / (fontsize * 0.6))
+    wrapper = textwrap.TextWrapper(width=20) 
+    return "\n".join(wrapper.wrap(text))
+
 def render_preview(template, output_path):
     design = template.get("template_json", {}).get("design", {})
     track_items_map = design.get("trackItemsMap", {})
-    tracks = design.get("tracks", [])
     duration = float(template.get("duration", 10))
+    
+    canvas_w = design.get("size", {}).get("width", 1920)
+    canvas_h = design.get("size", {}).get("height", 1080)
 
     filter_parts = []
     input_files = []
     
-    # 1. Base Layer
-    filter_parts.append(f"color=c=black:s=1920x1080:d={duration}[base];")
+    # 1. Base Canvas
+    filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]")
     last_label = "[base]"
 
-    # --- PHASE 1: VIDEOS & IMAGES (Background Layers) ---
+    # --- PHASE 1 & 2: VISUALS (Videos, Images, Text) ---
     v_img_count = 0
-    for track in tracks:
-        if track["type"] in ["video", "image"]:
-            for item_id in track.get("items", []):
-                item = track_items_map.get(item_id, {})
-                details = item.get("details", {})
-                display = item.get("display", {})
-                
-                abs_src = abs_media_path(details.get("src"))
-                ensure_file_exists(abs_src)
-                input_files.append(abs_src)
-                
-                idx = len(input_files) - 1
-                start = display.get("from", 0) / 1000
-                end = display.get("to", duration * 1000) / 1000
-                
-                # Scale and Overlay
-                v_label = f"[v_layer{v_img_count}]"
-                o_label = f"[ov_layer{v_img_count}]"
-                
-                filter_parts.append(f"[{idx}:v]scale=1920:1080,setpts=PTS-STARTPTS{v_label};")
-                filter_parts.append(f"{last_label}{v_label}overlay=0:0:enable='between(t,{start},{end})'{o_label};")
-                
-                last_label = o_label
-                v_img_count += 1
-
-    # --- PHASE 2: TEXT (Foreground Layer - Sabse upar) ---
     txt_count = 0
-    for track in tracks:
-        if track["type"] == "text":
-            for item_id in track.get("items", []):
-                item = track_items_map.get(item_id, {})
-                details = item.get("details", {})
-                display = item.get("display", {})
-                
-                text = ffmpeg_escape_text(details.get("text", ""))
-                left = int(parse_px(details.get("left", 0)))
-                top = int(parse_px(details.get("top", 0)))
-                fontsize = int(details.get("fontSize", 48))
-                color = details.get("color", "#ffffff").replace("#", "0x")
-                start = display.get("from", 0) / 1000
-                end = display.get("to", duration * 1000) / 1000
-                
-                t_label = f"[out_txt{txt_count}]"
-                
-                filter_parts.append(
-                    f"{last_label}drawtext=fontfile='{ffmpeg_escape_path(FONT_PATH)}':"
-                    f"text='{text}':x={left}:y={top}:fontsize={fontsize}:fontcolor={color}:"
-                    f"enable='between(t,{start},{end})'{t_label};"
-                )
-                last_label = t_label
-                txt_count += 1
+    
+    # trackItemIds ensures correct Z-index (order)
+    for item_id in design.get("trackItemIds", []):
+        item = track_items_map.get(item_id, {})
+        details = item.get("details", {})
+        display = item.get("display", {})
+        start = display.get("from", 0) / 1000
+        end = display.get("to", duration * 1000) / 1000
 
-    # --- PHASE 3: AUDIO ---
-    audio_idx = None
-    for track in tracks:
-        if track["type"] == "audio":
-            for item_id in track.get("items", []):
-                abs_src = abs_media_path(track_items_map[item_id]["details"]["src"])
-                input_files.append(abs_src)
-                audio_idx = len(input_files) - 1
+        if item.get("type") in ["video", "image"]:
+            abs_src = abs_media_path(details.get("src"))
+            ensure_file_exists(abs_src)
+            input_files.append(abs_src)
+            
+            idx = len(input_files) - 1
+            
+            # Extract Scaling
+            transform_str = details.get("transform", "scale(1)")
+            scale_val = 1.0
+            if "scale" in transform_str:
+                try:
+                    # Clean "scale(0.34)" to 0.34
+                    scale_val = float(re.search(r"scale\((.*?)\)", transform_str).group(1))
+                except: scale_val = 1.0
 
-    # Final Command Build
+            target_w = int(float(details.get("width", canvas_w)) * scale_val)
+            target_h = int(float(details.get("height", canvas_h)) * scale_val)
+            
+            left = int(parse_px(details.get("left", 0)))
+            top = int(parse_px(details.get("top", 0)))
+
+            v_label = f"v{v_img_count}"
+            o_label = f"ov{v_img_count}"
+            
+            # Chain logic: [last_label][v_label]overlay...
+            filter_parts.append(f"[{idx}:v]scale={target_w}:{target_h},setpts=PTS-STARTPTS[{v_label}]")
+            filter_parts.append(f"{last_label}[{v_label}]overlay={left}:{top}:enable='between(t,{start},{end})'[{o_label}]")
+            
+            last_label = f"[{o_label}]"
+            v_img_count += 1
+
+        elif item.get("type") == "text":
+            # Apply Manual Wrapping
+            raw_text = details.get("text", "")
+            wrapped = wrap_text(raw_text, int(details.get("width", 600)))
+            text = ffmpeg_escape_text(wrapped)
+            
+            left = int(parse_px(details.get("left", 0)))
+            top = int(parse_px(details.get("top", 0)))
+            fontsize = int(details.get("fontSize", 48))
+            color = details.get("color", "#ffffff").replace("#", "0x")
+            
+            t_label = f"txt{txt_count}"
+            filter_parts.append(
+                f"{last_label}drawtext=fontfile='{ffmpeg_escape_path(FONT_PATH)}':"
+                f"text='{text}':x={left}:y={top}:fontsize={fontsize}:fontcolor={color}:"
+                f"enable='between(t,{start},{end})'[{t_label}]"
+            )
+            last_label = f"[{t_label}]"
+            txt_count += 1
+
+    # --- PHASE 3: AUDIO MIXING ---
+    audio_inputs = []
+    for item_id in design.get("trackItemIds", []):
+        item = track_items_map.get(item_id, {})
+        if item.get("type") == "audio":
+            abs_src = abs_media_path(item["details"]["src"])
+            input_files.append(abs_src)
+            audio_inputs.append(len(input_files) - 1)
+
+    audio_filter = ""
+    if audio_inputs:
+        # Mix multiple audio tracks into one
+        mix_inputs = "".join([f"[{i}:a]" for i in audio_inputs])
+        audio_filter = f"{mix_inputs}amix=inputs={len(audio_inputs)}:duration=first[aout]"
+
+    # Combine all filters
+    full_filter = ";".join(filter_parts)
+    if audio_filter:
+        full_filter += ";" + audio_filter
+
+    # --- COMMAND EXECUTION ---
     cmd = ["ffmpeg", "-y"]
     for f in input_files: cmd += ["-i", f]
-    cmd += ["-filter_complex", "".join(filter_parts).rstrip(";")]
+    cmd += ["-filter_complex", full_filter]
     cmd += ["-map", last_label]
-    if audio_idx is not None: cmd += ["-map", f"{audio_idx}:a"]
+    if audio_inputs:
+        cmd += ["-map", "[aout]"]
+    
     cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", "30", "-t", str(duration), output_path]
 
     subprocess.run(cmd, check=True)
-
-    
+        
 def render_video(task_id: str):
     task = db.video_tasks.find_one({"_id": ObjectId(task_id)})
     template = db.templates.find_one({"_id": ObjectId(task["template_id"])})
