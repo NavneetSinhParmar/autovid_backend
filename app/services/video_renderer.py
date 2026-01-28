@@ -179,9 +179,41 @@ def generate_ffmpeg_cmd(template):
     # Return safe shell command
     return " ".join(shlex.quote(c) for c in cmd)
 
+def parse_scale(transform_str: str) -> float:
+    """
+    Handles: 'scale(1)', 'scale(0.5, 0.5)', 'none'
+    Returns: float (default 1.0)
+    """
+    if not transform_str or transform_str == "none":
+        return 1.0
+    try:
+        # scale(0.32, 0.32) -> 0.32, 0.32
+        inner = transform_str.replace("scale(", "").replace(")", "")
+        # Split by comma and take the first value
+        first_val = inner.split(",")[0].strip()
+        return float(first_val)
+    except Exception:
+        return 1.0
+
+def parse_px(value):
+    """Handles '123.45px', numeric values, and list-like strings"""
+    if isinstance(value, str):
+        # Kuch cases mein value '0.32, 0.32' bhi aa sakti hai transform error ki wajah se
+        clean_val = value.replace('px', '').split(',')[0].strip()
+        try:
+            return float(clean_val)
+        except:
+            return 0.0
+    return float(value) if value is not None else 0.0
+
+import re
+import os
+import subprocess
+
 def render_preview(template, output_path):
     design = template.get("template_json", {}).get("design", {})
     track_items_map = design.get("trackItemsMap", {})
+    tracks = design.get("tracks", []) # <--- Tracks loop yahan se shuru hoga
     duration = float(template.get("duration", 10))
     canvas_w, canvas_h = 1920, 1080
 
@@ -193,67 +225,84 @@ def render_preview(template, output_path):
     filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]")
     last_label = "[base]"
 
-    # Separate Inputs
-    for item_id in design.get("trackItemIds", []):
-        item = track_items_map.get(item_id, {})
-        itype = item.get("type")
-        src = item.get("details", {}).get("src", "").replace("./", "")
-        if itype in ["video", "image"]:
-            visual_inputs.append({"src": src, "item": item})
-        elif itype == "audio":
-            audio_inputs.append({"src": src, "item": item})
+    # 2. SEPARATE INPUTS (Using Tracks logic to get ALL items)
+    for track in tracks:
+        itype = track.get("type")
+        for item_id in track.get("items", []):
+            item = track_items_map.get(item_id, {})
+            details = item.get("details", {})
+            src = details.get("src", "").replace("./", "")
+            
+            if not src: continue
 
-    # Build Visual Filters
+            if itype in ["video", "image"] or item.get("type") in ["video", "image"]:
+                visual_inputs.append({"src": src, "item": item})
+            elif itype == "audio":
+                audio_inputs.append({"src": src, "item": item})
+
+    # 3. BUILD VISUAL FILTERS (Videos & Images)
     for idx, data in enumerate(visual_inputs):
         item = data["item"]
         details = item.get("details", {})
         display = item.get("display", {})
-        start, end = display.get("from", 0)/1000, display.get("to", duration*1000)/1000
+        start = display.get("from", 0) / 1000
+        end = display.get("to", duration * 1000) / 1000
         
-        # Scaling
-        t_str = details.get("transform", "scale(1)")
+        # --- FLOAT CONVERSION FIX (Server Error Fix) ---
+        t_str = str(details.get("transform", "scale(1)"))
         scale_val = 1.0
-        match = re.search(r"scale\((.*?)\)", t_str)
-        if match: scale_val = float(match.group(1))
+        # Regular expression to handle scale(0.3) or scale(0.3, 0.3)
+        match = re.search(r"scale\(([^)]+)\)", t_str)
+        if match:
+            # Comma se split karke pehla part lenge (0.323186, 0.323186 -> 0.323186)
+            scale_val = float(match.group(1).split(',')[0].strip())
 
-        tw = int(float(details.get("width", 1920)) * scale_val)
-        th = int(float(details.get("height", 1080)) * scale_val)
+        tw = int(float(str(details.get("width", 1920))) * scale_val)
+        th = int(float(str(details.get("height", 1080))) * scale_val)
         
-        # Coordinates (Negative values handle)
-        left = float(str(details.get("left", "0")).replace("px", ""))
-        top = float(str(details.get("top", "0")).replace("px", ""))
+        # Coordinates Fix
+        left = float(str(details.get("left", "0")).replace("px", "").split(',')[0])
+        top = float(str(details.get("top", "0")).replace("px", "").split(',')[0])
 
-        # FIX: Single brackets labels
         scaled = f"sc{idx}"
         overlaid = f"ov{idx}"
         
+        # Filter Logic
         filter_parts.append(f"[{idx}:v]scale={tw}:{th},setpts=PTS-STARTPTS+{start}/TB[{scaled}]")
         filter_parts.append(f"{last_label}[{scaled}]overlay={left}:{top}:enable='between(t,{start},{end})'[{overlaid}]")
         
         last_label = f"[{overlaid}]"
 
-    # Handle Text
-    for idx, item_id in enumerate(design.get("trackItemIds", [])):
-        item = track_items_map.get(item_id, {})
-        if item.get("type") == "text":
-            details, display = item.get("details", {}), item.get("display", {})
-            start, end = display.get("from", 0)/1000, display.get("to", duration*1000)/1000
-            
-            # Windows Drawtext Path Fix
-            font_path = os.path.abspath("app/Fonts/arial.ttf").replace("\\", "/").replace(":", "\\:")
-            text = details.get("text", "").replace("'", "")
-            x, y = float(str(details.get("left", 0)).replace("px","")), float(str(details.get("top", 0)).replace("px",""))
+    # 4. HANDLE TEXT (Sabse upar - Foreground)
+    txt_idx = 0
+    for track in tracks:
+        if track.get("type") == "text":
+            for item_id in track.get("items", []):
+                item = track_items_map.get(item_id, {})
+                details = item.get("details", {})
+                display = item.get("display", {})
+                
+                start = display.get("from", 0) / 1000
+                end = display.get("to", duration * 1000) / 1000
+                
+                # Path & Text Clean
+                font_path = os.path.abspath("app/Fonts/arial.ttf").replace("\\", "/").replace(":", "\\:")
+                text = details.get("text", "").replace("'", "")
+                x = float(str(details.get("left", 0)).replace("px","").split(',')[0])
+                y = float(str(details.get("top", 0)).replace("px","").split(',')[0])
 
-            txt_label = f"tx{idx}"
-            filter_parts.append(
-                f"{last_label}drawtext=fontfile='{font_path}':text='{text}':"
-                f"x={x}:y={y}:fontsize={details.get('fontSize', 60)}:fontcolor=white:"
-                f"enable='between(t,{start},{end})'[{txt_label}]"
-            )
-            last_label = f"[{txt_label}]"
+                txt_label = f"tx{txt_idx}"
+                filter_parts.append(
+                    f"{last_label}drawtext=fontfile='{font_path}':text='{text}':"
+                    f"x={x}:y={y}:fontsize={details.get('fontSize', 60)}:fontcolor=white:"
+                    f"enable='between(t,{start},{end})'[{txt_label}]"
+                )
+                last_label = f"[{txt_label}]"
+                txt_idx += 1
 
-    # Command Execution
+    # 5. EXECUTION
     cmd = ["ffmpeg", "-y"]
+    # Inputs list build
     for v in visual_inputs:
         if v["src"].lower().endswith(('.jpg', '.jpeg', '.png')):
             cmd += ["-loop", "1", "-t", str(duration), "-i", v["src"]]
@@ -265,12 +314,14 @@ def render_preview(template, output_path):
     cmd += ["-filter_complex", ";".join(filter_parts), "-map", last_label]
     
     if audio_inputs:
+        # Audio mapping (first audio input)
         cmd += ["-map", f"{len(visual_inputs)}:a", "-c:a", "aac", "-shortest"]
 
     cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-t", str(duration), output_path]
+    
     subprocess.run(cmd, check=True)
 
-
+    
 def render_video(task_id: str):
     task = db.video_tasks.find_one({"_id": ObjectId(task_id)})
     template = db.templates.find_one({"_id": ObjectId(task["template_id"])})
