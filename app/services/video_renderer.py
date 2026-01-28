@@ -179,144 +179,98 @@ def generate_ffmpeg_cmd(template):
     # Return safe shell command
     return " ".join(shlex.quote(c) for c in cmd)
 
-import textwrap
-
-def wrap_text(text, width):
-    """FFmpeg doesn't wrap text, so we manually insert newlines."""
-    if not text: return ""
-    # 600px width par 120 fontsize ke liye approx 10-15 chars aate hain
-    # Aap isko calculate bhi kar sakte hain: (width / (fontsize * 0.6))
-    wrapper = textwrap.TextWrapper(width=20) 
-    return "\n".join(wrapper.wrap(text))
-
 def render_preview(template, output_path):
     design = template.get("template_json", {}).get("design", {})
     track_items_map = design.get("trackItemsMap", {})
     duration = float(template.get("duration", 10))
-    
-    canvas_w = design.get("size", {}).get("width", 1920)
-    canvas_h = design.get("size", {}).get("height", 1080)
+    canvas_w, canvas_h = 1920, 1080
 
     filter_parts = []
-    input_files = []
+    visual_inputs = [] 
+    audio_inputs = []  
     
-    # 1. Base Canvas (Sabse niche ki layer)
+    # 1. Base Layer
     filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]")
     last_label = "[base]"
 
-    v_img_count = 0
-    txt_count = 0
-    visual_inputs = [] # Video/Image input indices track karne ke liye
-
-    # trackItemIds se order maintain hota hai (Z-index)
+    # Separate Inputs
     for item_id in design.get("trackItemIds", []):
         item = track_items_map.get(item_id, {})
+        itype = item.get("type")
+        src = item.get("details", {}).get("src", "").replace("./", "")
+        if itype in ["video", "image"]:
+            visual_inputs.append({"src": src, "item": item})
+        elif itype == "audio":
+            audio_inputs.append({"src": src, "item": item})
+
+    # Build Visual Filters
+    for idx, data in enumerate(visual_inputs):
+        item = data["item"]
         details = item.get("details", {})
         display = item.get("display", {})
+        start, end = display.get("from", 0)/1000, display.get("to", duration*1000)/1000
         
-        start = display.get("from", 0) / 1000
-        end = display.get("to", duration * 1000) / 1000
+        # Scaling
+        t_str = details.get("transform", "scale(1)")
+        scale_val = 1.0
+        match = re.search(r"scale\((.*?)\)", t_str)
+        if match: scale_val = float(match.group(1))
 
-        # --- PHASE 1: VIDEO & IMAGE ---
-        if item.get("type") in ["video", "image"]:
-            abs_src = abs_media_path(details.get("src"))
-            ensure_file_exists(abs_src)
-            input_files.append(abs_src)
-            
-            curr_input_idx = len(input_files) - 1
-            
-            # Scaling logic
-            transform_str = details.get("transform", "scale(1)")
-            scale_val = 1.0
-            if "scale" in transform_str:
-                try:
-                    match = re.search(r"scale\((.*?)\)", transform_str)
-                    scale_val = float(match.group(1)) if match else 1.0
-                except: scale_val = 1.0
+        tw = int(float(details.get("width", 1920)) * scale_val)
+        th = int(float(details.get("height", 1080)) * scale_val)
+        
+        # Coordinates (Negative values handle)
+        left = float(str(details.get("left", "0")).replace("px", ""))
+        top = float(str(details.get("top", "0")).replace("px", ""))
 
-            target_w = int(float(details.get("width", canvas_w)) * scale_val)
-            target_h = int(float(details.get("height", canvas_h)) * scale_val)
-            
-            left = int(parse_px(details.get("left", 0)))
-            top = int(parse_px(details.get("top", 0)))
+        # FIX: Single brackets labels
+        scaled = f"sc{idx}"
+        overlaid = f"ov{idx}"
+        
+        filter_parts.append(f"[{idx}:v]scale={tw}:{th},setpts=PTS-STARTPTS+{start}/TB[{scaled}]")
+        filter_parts.append(f"{last_label}[{scaled}]overlay={left}:{top}:enable='between(t,{start},{end})'[{overlaid}]")
+        
+        last_label = f"[{overlaid}]"
 
-            # Labels for this specific layer
-            scaled_label = f"scaled{v_img_count}"
-            overlaid_label = f"ovl{v_img_count}"
-            
-            # Important: Agar video hai toh [idx:v] use karo, agar image hai toh bhi [idx:v] FFmpeg images ke liye bhi chalta hai
-            # 1. Scale input
-            filter_parts.append(f"[{curr_input_idx}:v]scale={target_w}:{target_h},setpts=PTS-STARTPTS[{scaled_label}]")
-            # 2. Overlay onto the PREVIOUS result
-            filter_parts.append(f"{last_label}[{scaled_label}]overlay={left}:{top}:enable='between(t,{start},{end})'[{overlaid_label}]")
-            
-            # Agle item ke liye ye base ban jayega
-            last_label = f"[{overlaid_label}]"
-            v_img_count += 1
-
-        # --- PHASE 2: TEXT ---
-        elif item.get("type") == "text":
-            raw_text = details.get("text", "")
-            # Simple word wrap logic (Every 30 chars a new line)
-            wrapped_text = "\n".join(re.findall(r'.{1,30}(?:\s+|$)', raw_text))
-            text = ffmpeg_escape_text(wrapped_text)
-            
-            left = int(parse_px(details.get("left", 0)))
-            top = int(parse_px(details.get("top", 0)))
-            fontsize = int(details.get("fontSize", 48))
-            color = details.get("color", "#ffffff").replace("#", "0x")
-            
-            t_label = f"text_layer{txt_count}"
-            filter_parts.append(
-                f"{last_label}drawtext=fontfile='{ffmpeg_escape_path(FONT_PATH)}':"
-                f"text='{text}':x={left}:y={top}:fontsize={fontsize}:fontcolor={color}:"
-                f"enable='between(t,{start},{end})'[{t_label}]"
-            )
-            last_label = f"[{t_label}]"
-            txt_count += 1
-
-    # --- PHASE 3: AUDIO ---
-    # Saare audio inputs ko dhoondho
-    audio_indices = []
-    for idx, f_path in enumerate(input_files):
-        # Hum check kar rahe hain ki kya ye input audio file hai
-        # trackItemsMap se cross-check karna better hai
-        pass 
-
-    # Short version for Audio (Mixing all available audio inputs)
-    audio_map = []
-    for item_id in design.get("trackItemIds", []):
+    # Handle Text
+    for idx, item_id in enumerate(design.get("trackItemIds", [])):
         item = track_items_map.get(item_id, {})
-        if item.get("type") == "audio":
-            abs_src = abs_media_path(item["details"]["src"])
-            input_files.append(abs_src)
-            audio_map.append(len(input_files) - 1)
+        if item.get("type") == "text":
+            details, display = item.get("details", {}), item.get("display", {})
+            start, end = display.get("from", 0)/1000, display.get("to", duration*1000)/1000
+            
+            # Windows Drawtext Path Fix
+            font_path = os.path.abspath("app/Fonts/arial.ttf").replace("\\", "/").replace(":", "\\:")
+            text = details.get("text", "").replace("'", "")
+            x, y = float(str(details.get("left", 0)).replace("px","")), float(str(details.get("top", 0)).replace("px",""))
 
-    # Building the Final Command
+            txt_label = f"tx{idx}"
+            filter_parts.append(
+                f"{last_label}drawtext=fontfile='{font_path}':text='{text}':"
+                f"x={x}:y={y}:fontsize={details.get('fontSize', 60)}:fontcolor=white:"
+                f"enable='between(t,{start},{end})'[{txt_label}]"
+            )
+            last_label = f"[{txt_label}]"
+
+    # Command Execution
     cmd = ["ffmpeg", "-y"]
-    for f in input_files:
-        cmd += ["-i", f]
-    
-    # Filter Complex string build
-    filter_str = ";".join(filter_parts)
-    
-    # Audio Mixing logic
-    if audio_map:
-        amix_inputs = "".join([f"[{i}:a]" for i in audio_map])
-        filter_str += f";{amix_inputs}amix=inputs={len(audio_map)}:duration=first[aout]"
-    
-    cmd += ["-filter_complex", filter_str]
-    cmd += ["-map", last_label] # Final Video Label
-    
-    if audio_map:
-        cmd += ["-map", "[aout]"]
-    
-    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", "30", "-t", str(duration), output_path]
+    for v in visual_inputs:
+        if v["src"].lower().endswith(('.jpg', '.jpeg', '.png')):
+            cmd += ["-loop", "1", "-t", str(duration), "-i", v["src"]]
+        else:
+            cmd += ["-i", v["src"]]
+    for a in audio_inputs:
+        cmd += ["-i", a["src"]]
 
-    print("🚀 Executing FFmpeg...")
-    subprocess.run(cmd, check=True)
+    cmd += ["-filter_complex", ";".join(filter_parts), "-map", last_label]
     
-        
+    if audio_inputs:
+        cmd += ["-map", f"{len(visual_inputs)}:a", "-c:a", "aac", "-shortest"]
+
+    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-t", str(duration), output_path]
+    subprocess.run(cmd, check=True)
+
+
 def render_video(task_id: str):
     task = db.video_tasks.find_one({"_id": ObjectId(task_id)})
     template = db.templates.find_one({"_id": ObjectId(task["template_id"])})
