@@ -30,6 +30,16 @@ async def create_template(
     if not company:
         raise HTTPException(400, "Company not found")
 
+    template_json = data.get("template_json", {})
+    design = template_json.get("design", {}) if isinstance(template_json, dict) else {}
+    options = template_json.get("options", {}) if isinstance(template_json, dict) else {}
+    if isinstance(design, dict):
+        if "fps" not in design and isinstance(options, dict) and "fps" in options:
+            design["fps"] = options["fps"]
+        if "size" not in design:
+            design["size"] = {"width": 1920, "height": 1080}
+        template_json["design"] = design
+
     template_doc = {
         "company_id": str(company["_id"]),
         "template_name": data["template_name"],
@@ -39,7 +49,7 @@ async def create_template(
         "base_audio_url": data.get("base_audio_url"),
         "duration": data.get("duration"),
         "trim": data.get("trim"),
-        "template_json": data["template_json"],
+        "template_json": template_json,
         "type": data.get("type", "video"),
         "status": "active",
         "created_at": datetime.utcnow(),
