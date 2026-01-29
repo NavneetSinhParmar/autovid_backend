@@ -206,14 +206,21 @@ def parse_px(value):
             return 0.0
     return float(value) if value is not None else 0.0
 
-import re
-import os
-import subprocess
+
+def safe_float(val):
+    """Helper: handles '10px', '0.32, 0.32', and None values safely."""
+    if val is None: return 0.0
+    try:
+        # px hatayein, comma se split karein (pehle value lein), aur strip karein
+        clean_val = str(val).replace("px", "").split(',')[0].strip()
+        return float(clean_val)
+    except (ValueError, IndexError):
+        return 0.0
 
 def render_preview(template, output_path):
     design = template.get("template_json", {}).get("design", {})
     track_items_map = design.get("trackItemsMap", {})
-    tracks = design.get("tracks", []) # <--- Tracks loop yahan se shuru hoga
+    tracks = design.get("tracks", [])
     duration = float(template.get("duration", 10))
     canvas_w, canvas_h = 1920, 1080
 
@@ -221,11 +228,11 @@ def render_preview(template, output_path):
     visual_inputs = [] 
     audio_inputs = []  
     
-    # 1. Base Layer
+    # 1. Base Layer (Background)
     filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]")
     last_label = "[base]"
 
-    # 2. SEPARATE INPUTS (Using Tracks logic to get ALL items)
+    # 2. SEPARATE INPUTS (Ab ye saare items ko pick karega)
     for track in tracks:
         itype = track.get("type")
         for item_id in track.get("items", []):
@@ -235,6 +242,7 @@ def render_preview(template, output_path):
             
             if not src: continue
 
+            # Track type ya item type dono check kar rahe hain
             if itype in ["video", "image"] or item.get("type") in ["video", "image"]:
                 visual_inputs.append({"src": src, "item": item})
             elif itype == "audio":
@@ -245,35 +253,38 @@ def render_preview(template, output_path):
         item = data["item"]
         details = item.get("details", {})
         display = item.get("display", {})
+        
         start = display.get("from", 0) / 1000
         end = display.get("to", duration * 1000) / 1000
         
-        # --- FLOAT CONVERSION FIX (Server Error Fix) ---
+        # --- SCALE FIX (Resolves: could not convert string to float: '0.32, 0.32') ---
         t_str = str(details.get("transform", "scale(1)"))
         scale_val = 1.0
-        # Regular expression to handle scale(0.3) or scale(0.3, 0.3)
         match = re.search(r"scale\(([^)]+)\)", t_str)
         if match:
-            # Comma se split karke pehla part lenge (0.323186, 0.323186 -> 0.323186)
-            scale_val = float(match.group(1).split(',')[0].strip())
+            # Comma-separated values handle karega
+            scale_val = safe_float(match.group(1))
 
-        tw = int(float(str(details.get("width", 1920))) * scale_val)
-        th = int(float(str(details.get("height", 1080))) * scale_val)
+        # Size aur Position calculation
+        orig_w = safe_float(details.get("width", 1920))
+        orig_h = safe_float(details.get("height", 1080))
+        tw = int(orig_w * scale_val)
+        th = int(orig_h * scale_val)
         
-        # Coordinates Fix
-        left = float(str(details.get("left", "0")).replace("px", "").split(',')[0])
-        top = float(str(details.get("top", "0")).replace("px", "").split(',')[0])
+        left = safe_float(details.get("left", 0))
+        top = safe_float(details.get("top", 0))
 
+        # FFmpeg chain labels
         scaled = f"sc{idx}"
         overlaid = f"ov{idx}"
         
-        # Filter Logic
+        # Scaling aur Overlay filters
         filter_parts.append(f"[{idx}:v]scale={tw}:{th},setpts=PTS-STARTPTS+{start}/TB[{scaled}]")
         filter_parts.append(f"{last_label}[{scaled}]overlay={left}:{top}:enable='between(t,{start},{end})'[{overlaid}]")
         
         last_label = f"[{overlaid}]"
 
-    # 4. HANDLE TEXT (Sabse upar - Foreground)
+    # 4. HANDLE TEXT (Sabse upar rakha hai taaki video ke upar dikhe)
     txt_idx = 0
     for track in tracks:
         if track.get("type") == "text":
@@ -285,40 +296,49 @@ def render_preview(template, output_path):
                 start = display.get("from", 0) / 1000
                 end = display.get("to", duration * 1000) / 1000
                 
-                # Path & Text Clean
+                # Windows path escaping fix
                 font_path = os.path.abspath("app/Fonts/arial.ttf").replace("\\", "/").replace(":", "\\:")
-                text = details.get("text", "").replace("'", "")
-                x = float(str(details.get("left", 0)).replace("px","").split(',')[0])
-                y = float(str(details.get("top", 0)).replace("px","").split(',')[0])
-
+                text = details.get("text", "").replace("'", "") # Single quotes escape
+                
+                x = safe_float(details.get("left", 0))
+                y = safe_float(details.get("top", 0))
+                fs = int(safe_float(details.get("fontSize", 60)))
+                
                 txt_label = f"tx{txt_idx}"
                 filter_parts.append(
                     f"{last_label}drawtext=fontfile='{font_path}':text='{text}':"
-                    f"x={x}:y={y}:fontsize={details.get('fontSize', 60)}:fontcolor=white:"
+                    f"x={x}:y={y}:fontsize={fs}:fontcolor=white:"
                     f"enable='between(t,{start},{end})'[{txt_label}]"
                 )
                 last_label = f"[{txt_label}]"
                 txt_idx += 1
 
-    # 5. EXECUTION
+    # 5. COMMAND EXECUTION
     cmd = ["ffmpeg", "-y"]
-    # Inputs list build
+    
+    # Input files add karein
     for v in visual_inputs:
         if v["src"].lower().endswith(('.jpg', '.jpeg', '.png')):
+            # Images ke liye loop aur duration set karein
             cmd += ["-loop", "1", "-t", str(duration), "-i", v["src"]]
         else:
             cmd += ["-i", v["src"]]
+            
     for a in audio_inputs:
         cmd += ["-i", a["src"]]
 
+    # Filter complex aur mapping
     cmd += ["-filter_complex", ";".join(filter_parts), "-map", last_label]
     
+    # Audio mapping (agar audio inputs hain toh)
     if audio_inputs:
-        # Audio mapping (first audio input)
+        # Visual inputs ke baad pehla audio index len(visual_inputs) hoga
         cmd += ["-map", f"{len(visual_inputs)}:a", "-c:a", "aac", "-shortest"]
 
+    # Final output parameters
     cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-t", str(duration), output_path]
     
+    # Run command
     subprocess.run(cmd, check=True)
 
     
