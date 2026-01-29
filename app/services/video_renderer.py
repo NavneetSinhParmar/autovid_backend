@@ -207,14 +207,17 @@ def parse_px(value):
     return float(value) if value is not None else 0.0
 
 
+import re
+import os
+import subprocess
+
 def safe_float(val):
-    """Helper: handles '10px', '0.32, 0.32', and None values safely."""
     if val is None: return 0.0
     try:
-        # px hatayein, comma se split karein (pehle value lein), aur strip karein
+        # '0.32, 0.32' ya '100px' jaise cases handle karne ke liye
         clean_val = str(val).replace("px", "").split(',')[0].strip()
         return float(clean_val)
-    except (ValueError, IndexError):
+    except:
         return 0.0
 
 def render_preview(template, output_path):
@@ -222,125 +225,113 @@ def render_preview(template, output_path):
     track_items_map = design.get("trackItemsMap", {})
     tracks = design.get("tracks", [])
     duration = float(template.get("duration", 10))
-    canvas_w, canvas_h = 1920, 1080
+    
+    # JSON se size uthayein (Default 1920x1080)
+    canvas_w = design.get("size", {}).get("width", 1920)
+    canvas_h = design.get("size", {}).get("height", 1080)
 
     filter_parts = []
     visual_inputs = [] 
     audio_inputs = []  
     
-    # 1. Base Layer (Background)
+    # 1. Base Black Canvas
     filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]")
     last_label = "[base]"
 
-    # 2. SEPARATE INPUTS (Ab ye saare items ko pick karega)
+    # 2. Inputs Collection
     for track in tracks:
         itype = track.get("type")
         for item_id in track.get("items", []):
             item = track_items_map.get(item_id, {})
             details = item.get("details", {})
             src = details.get("src", "").replace("./", "")
-            
             if not src: continue
 
-            # Track type ya item type dono check kar rahe hain
             if itype in ["video", "image"] or item.get("type") in ["video", "image"]:
                 visual_inputs.append({"src": src, "item": item})
             elif itype == "audio":
                 audio_inputs.append({"src": src, "item": item})
 
-    # 3. BUILD VISUAL FILTERS (Videos & Images)
+    # 3. Visual Layers (Videos/Images)
     for idx, data in enumerate(visual_inputs):
         item = data["item"]
         details = item.get("details", {})
         display = item.get("display", {})
+        start, end = display.get("from", 0)/1000, display.get("to", duration*1000)/1000
         
-        start = display.get("from", 0) / 1000
-        end = display.get("to", duration * 1000) / 1000
-        
-        # --- SCALE FIX (Resolves: could not convert string to float: '0.32, 0.32') ---
+        # Scale logic
         t_str = str(details.get("transform", "scale(1)"))
         scale_val = 1.0
         match = re.search(r"scale\(([^)]+)\)", t_str)
-        if match:
-            # Comma-separated values handle karega
-            scale_val = safe_float(match.group(1))
+        if match: scale_val = safe_float(match.group(1))
 
-        # Size aur Position calculation
-        orig_w = safe_float(details.get("width", 1920))
-        orig_h = safe_float(details.get("height", 1080))
-        tw = int(orig_w * scale_val)
-        th = int(orig_h * scale_val)
-        
-        left = safe_float(details.get("left", 0))
-        top = safe_float(details.get("top", 0))
+        # JSON size * transform scale
+        tw = int(safe_float(details.get("width", canvas_w)) * scale_val)
+        th = int(safe_float(details.get("height", canvas_h)) * scale_val)
+        left, top = safe_float(details.get("left", 0)), safe_float(details.get("top", 0))
 
-        # FFmpeg chain labels
-        scaled = f"sc{idx}"
-        overlaid = f"ov{idx}"
+        scaled, overlaid = f"sc{idx}", f"ov{idx}"
         
-        # Scaling aur Overlay filters
+        # Filter: Pehle scale karo, phir background par overlay karo
         filter_parts.append(f"[{idx}:v]scale={tw}:{th},setpts=PTS-STARTPTS+{start}/TB[{scaled}]")
         filter_parts.append(f"{last_label}[{scaled}]overlay={left}:{top}:enable='between(t,{start},{end})'[{overlaid}]")
-        
         last_label = f"[{overlaid}]"
 
-    # 4. HANDLE TEXT (Sabse upar rakha hai taaki video ke upar dikhe)
+    # 4. Text Layers (Always on top of video)
     txt_idx = 0
     for track in tracks:
         if track.get("type") == "text":
             for item_id in track.get("items", []):
                 item = track_items_map.get(item_id, {})
-                details = item.get("details", {})
-                display = item.get("display", {})
+                details, display = item.get("details", {}), item.get("display", {})
+                start, end = display.get("from", 0)/1000, display.get("to", duration*1000)/1000
                 
-                start = display.get("from", 0) / 1000
-                end = display.get("to", duration * 1000) / 1000
-                
-                # Windows path escaping fix
-                font_path = os.path.abspath("app/Fonts/arial.ttf").replace("\\", "/").replace(":", "\\:")
-                text = details.get("text", "").replace("'", "") # Single quotes escape
-                
-                x = safe_float(details.get("left", 0))
-                y = safe_float(details.get("top", 0))
+                text = details.get("text", "").replace("'", "\\'").replace(":", "\\:")
+                x, y = safe_float(details.get("left", 0)), safe_float(details.get("top", 0))
                 fs = int(safe_float(details.get("fontSize", 60)))
+                color = details.get("color", "#ffffff").replace("#", "0x")
+                
+                # Font path fix
+                font_path = os.path.abspath("app/Fonts/arial.ttf").replace("\\", "/").replace(":", "\\:")
                 
                 txt_label = f"tx{txt_idx}"
+                # Drawtext application
                 filter_parts.append(
                     f"{last_label}drawtext=fontfile='{font_path}':text='{text}':"
-                    f"x={x}:y={y}:fontsize={fs}:fontcolor=white:"
+                    f"x={x}:y={y}:fontsize={fs}:fontcolor={color}:"
                     f"enable='between(t,{start},{end})'[{txt_label}]"
                 )
                 last_label = f"[{txt_label}]"
                 txt_idx += 1
 
-    # 5. COMMAND EXECUTION
+    # 5. Audio Mixing
+    audio_filter = ""
+    if audio_inputs:
+        a_labels = ""
+        for i in range(len(audio_inputs)):
+            idx = len(visual_inputs) + i
+            a_start = int(audio_inputs[i]["item"].get("display", {}).get("from", 0))
+            a_labels += f"[{idx}:a]adelay={a_start}|{a_start}[aud{i}];"
+        audio_filter = f"{a_labels}" + "".join([f"[aud{i}]" for i in range(len(audio_inputs))]) + f"amix=inputs={len(audio_inputs)}[outa]"
+
+    # 6. Final Build & Run
     cmd = ["ffmpeg", "-y"]
-    
-    # Input files add karein
     for v in visual_inputs:
         if v["src"].lower().endswith(('.jpg', '.jpeg', '.png')):
-            # Images ke liye loop aur duration set karein
             cmd += ["-loop", "1", "-t", str(duration), "-i", v["src"]]
         else:
             cmd += ["-i", v["src"]]
-            
     for a in audio_inputs:
         cmd += ["-i", a["src"]]
 
-    # Filter complex aur mapping
-    cmd += ["-filter_complex", ";".join(filter_parts), "-map", last_label]
-    
-    # Audio mapping (agar audio inputs hain toh)
-    if audio_inputs:
-        # Visual inputs ke baad pehla audio index len(visual_inputs) hoga
-        cmd += ["-map", f"{len(visual_inputs)}:a", "-c:a", "aac", "-shortest"]
+    if audio_filter:
+        cmd += ["-filter_complex", ";".join(filter_parts) + ";" + audio_filter, "-map", last_label, "-map", "[outa]"]
+    else:
+        cmd += ["-filter_complex", ";".join(filter_parts), "-map", last_label]
 
-    # Final output parameters
-    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-t", str(duration), output_path]
-    
-    # Run command
+    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-t", str(duration), output_path]
     subprocess.run(cmd, check=True)
-
+    
     
 def render_video(task_id: str):
     task = db.video_tasks.find_one({"_id": ObjectId(task_id)})
