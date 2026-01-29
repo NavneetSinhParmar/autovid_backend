@@ -212,12 +212,12 @@ import os
 import subprocess
 
 def safe_float(val):
+    """Handles '10px', '0.32, 0.32', and None values safely."""
     if val is None: return 0.0
     try:
-        # '0.32, 0.32' ya '100px' jaise cases handle karne ke liye
         clean_val = str(val).replace("px", "").split(',')[0].strip()
         return float(clean_val)
-    except:
+    except (ValueError, IndexError):
         return 0.0
 
 def render_preview(template, output_path):
@@ -226,19 +226,19 @@ def render_preview(template, output_path):
     tracks = design.get("tracks", [])
     duration = float(template.get("duration", 10))
     
-    # JSON se size uthayein (Default 1920x1080)
-    canvas_w = design.get("size", {}).get("width", 1920)
-    canvas_h = design.get("size", {}).get("height", 1080)
+    # JSON se canvas ka size uthayein
+    canvas_w = int(design.get("size", {}).get("width", 1920))
+    canvas_h = int(design.get("size", {}).get("height", 1080))
 
     filter_parts = []
     visual_inputs = [] 
     audio_inputs = []  
     
-    # 1. Base Black Canvas
+    # 1. Base Layer (Background Canvas)
     filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]")
     last_label = "[base]"
 
-    # 2. Inputs Collection
+    # 2. SEPARATE INPUTS (Videos, Images, Audio)
     for track in tracks:
         itype = track.get("type")
         for item_id in track.get("items", []):
@@ -252,32 +252,29 @@ def render_preview(template, output_path):
             elif itype == "audio":
                 audio_inputs.append({"src": src, "item": item})
 
-    # 3. Visual Layers (Videos/Images)
+    # 3. BUILD VISUAL FILTERS (Videos & Images)
     for idx, data in enumerate(visual_inputs):
-        item = data["item"]
-        details = item.get("details", {})
+        item, details = data["item"], data["item"].get("details", {})
         display = item.get("display", {})
         start, end = display.get("from", 0)/1000, display.get("to", duration*1000)/1000
         
-        # Scale logic
+        # Scale handling (fix comma error)
         t_str = str(details.get("transform", "scale(1)"))
         scale_val = 1.0
         match = re.search(r"scale\(([^)]+)\)", t_str)
         if match: scale_val = safe_float(match.group(1))
 
-        # JSON size * transform scale
+        # Scaling and Positioning
         tw = int(safe_float(details.get("width", canvas_w)) * scale_val)
         th = int(safe_float(details.get("height", canvas_h)) * scale_val)
         left, top = safe_float(details.get("left", 0)), safe_float(details.get("top", 0))
 
         scaled, overlaid = f"sc{idx}", f"ov{idx}"
-        
-        # Filter: Pehle scale karo, phir background par overlay karo
         filter_parts.append(f"[{idx}:v]scale={tw}:{th},setpts=PTS-STARTPTS+{start}/TB[{scaled}]")
         filter_parts.append(f"{last_label}[{scaled}]overlay={left}:{top}:enable='between(t,{start},{end})'[{overlaid}]")
         last_label = f"[{overlaid}]"
 
-    # 4. Text Layers (Always on top of video)
+    # 4. HANDLE TEXT (Dynamic JSON Styles)
     txt_idx = 0
     for track in tracks:
         if track.get("type") == "text":
@@ -286,16 +283,20 @@ def render_preview(template, output_path):
                 details, display = item.get("details", {}), item.get("display", {})
                 start, end = display.get("from", 0)/1000, display.get("to", duration*1000)/1000
                 
+                # Text props
                 text = details.get("text", "").replace("'", "\\'").replace(":", "\\:")
                 x, y = safe_float(details.get("left", 0)), safe_float(details.get("top", 0))
                 fs = int(safe_float(details.get("fontSize", 60)))
                 color = details.get("color", "#ffffff").replace("#", "0x")
                 
-                # Font path fix
+                # TextAlign logic (Horizontal Centering)
+                if details.get("textAlign") == "center":
+                    box_w = safe_float(details.get("width", 0))
+                    x = f"{x}+({box_w}-text_w)/2"
+
                 font_path = os.path.abspath("app/Fonts/arial.ttf").replace("\\", "/").replace(":", "\\:")
                 
                 txt_label = f"tx{txt_idx}"
-                # Drawtext application
                 filter_parts.append(
                     f"{last_label}drawtext=fontfile='{font_path}':text='{text}':"
                     f"x={x}:y={y}:fontsize={fs}:fontcolor={color}:"
@@ -304,30 +305,30 @@ def render_preview(template, output_path):
                 last_label = f"[{txt_label}]"
                 txt_idx += 1
 
-    # 5. Audio Mixing
-    audio_filter = ""
+    # 5. AUDIO MIXING
+    audio_mix_filter = ""
     if audio_inputs:
         a_labels = ""
         for i in range(len(audio_inputs)):
             idx = len(visual_inputs) + i
             a_start = int(audio_inputs[i]["item"].get("display", {}).get("from", 0))
             a_labels += f"[{idx}:a]adelay={a_start}|{a_start}[aud{i}];"
-        audio_filter = f"{a_labels}" + "".join([f"[aud{i}]" for i in range(len(audio_inputs))]) + f"amix=inputs={len(audio_inputs)}[outa]"
+        
+        audio_mix_filter = f"{a_labels}" + "".join([f"[aud{i}]" for i in range(len(audio_inputs))]) + f"amix=inputs={len(audio_inputs)}[outa]"
 
-    # 6. Final Build & Run
+    # 6. EXECUTION
     cmd = ["ffmpeg", "-y"]
     for v in visual_inputs:
-        if v["src"].lower().endswith(('.jpg', '.jpeg', '.png')):
-            cmd += ["-loop", "1", "-t", str(duration), "-i", v["src"]]
-        else:
-            cmd += ["-i", v["src"]]
+        cmd += ["-loop", "1", "-t", str(duration), "-i", v["src"]] if v["src"].lower().endswith(('.jpg', '.png')) else ["-i", v["src"]]
     for a in audio_inputs:
         cmd += ["-i", a["src"]]
 
-    if audio_filter:
-        cmd += ["-filter_complex", ";".join(filter_parts) + ";" + audio_filter, "-map", last_label, "-map", "[outa]"]
+    full_filter = ";".join(filter_parts)
+    if audio_mix_filter:
+        full_filter += ";" + audio_mix_filter
+        cmd += ["-filter_complex", full_filter, "-map", last_label, "-map", "[outa]"]
     else:
-        cmd += ["-filter_complex", ";".join(filter_parts), "-map", last_label]
+        cmd += ["-filter_complex", full_filter, "-map", last_label]
 
     cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-t", str(duration), output_path]
     subprocess.run(cmd, check=True)
