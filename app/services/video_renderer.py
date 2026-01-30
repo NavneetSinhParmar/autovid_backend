@@ -234,8 +234,14 @@ def compute_line_spacing(line_height, font_size):
 def wrap_text(text, max_width, font_size, letter_spacing, word_wrap, word_break):
     if not text:
         return text
-    if not max_width or max_width <= 0 or font_size <= 0:
+    # if not max_width or max_width <= 0 or font_size <= 0:
+    #     return text
+    if font_size <= 0:
         return text
+
+    if not max_width or max_width <= 0:
+        max_width = font_size * 15   # 👈 FORCE DEFAULT WRAP WIDTH
+
     avg_char = max(1.0, (font_size * 0.6) + max(0.0, letter_spacing))
     max_chars = max(1, int(max_width / avg_char))
     allow_break = str(word_wrap).lower() in ("break-word", "anywhere") or str(word_break).lower() in ("break-all", "break-word", "anywhere")
