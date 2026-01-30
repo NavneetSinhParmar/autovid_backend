@@ -317,7 +317,16 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx):
     # max_width = parse_px(details.get("width", 0)) if details.get("width") not in (None, "") else 0
     # max_width = max_width * scale_val
     # TEXT WIDTH RESOLUTION (Canvas fallback)
-    max_width = details.get("width")
+    raw_width = details.get("width")
+
+    if raw_width in (None, "", 0):
+        canvas_w = details.get("_canvas_width", 1920)
+        left_pos = parse_px(details.get("left", 0))
+        max_width = max(100, canvas_w - left_pos - 40)
+    else:
+        max_width = parse_px(raw_width)
+
+    max_width = max_width * scale_val
 
     if max_width in (None, "", 0):
         # Agar width nahi di hai → canvas ke andar fit karo
