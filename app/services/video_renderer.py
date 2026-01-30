@@ -308,8 +308,21 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx):
     letter_spacing = letter_spacing * scale_val
     line_spacing = compute_line_spacing(details.get("lineHeight", "normal"), font_size)
 
-    max_width = parse_px(details.get("width", 0)) if details.get("width") not in (None, "") else 0
+    # max_width = parse_px(details.get("width", 0)) if details.get("width") not in (None, "") else 0
+    # max_width = max_width * scale_val
+    # TEXT WIDTH RESOLUTION (Canvas fallback)
+    max_width = details.get("width")
+
+    if max_width in (None, "", 0):
+        # Agar width nahi di hai → canvas ke andar fit karo
+        canvas_width = details.get("_canvas_width", 1920)
+        left_pos = parse_px(details.get("left", 0))
+        max_width = max(50, canvas_width - left_pos - 20)
+    else:
+        max_width = parse_px(max_width)
+
     max_width = max_width * scale_val
+
     word_wrap = details.get("wordWrap", "normal")
     word_break = details.get("wordBreak", "normal")
     wrapped_text = wrap_text(raw_text, max_width, font_size, letter_spacing, word_wrap, word_break)
@@ -454,6 +467,7 @@ def generate_ffmpeg_cmd(template):
     txt_count = 0
     for idx, txt_id in enumerate(text_items):
         item = track_map[txt_id]
+        item["details"]["_canvas_width"] = canvas_w
         last_label, txt_count = add_text_item_filters(
             filter_parts,
             last_label,
@@ -540,10 +554,6 @@ def parse_px(value):
             return 0.0
     return float(value) if value is not None else 0.0
 
-
-import re
-import os
-import subprocess
 
 def safe_float(val):
     """Handles '10px', '0.32, 0.32', and None values safely."""
