@@ -21,7 +21,7 @@ DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
 MEDIA_ROOT = os.getenv("MEDIA_ROOT", "media")
 
-print("📁 MEDIA_ROOT =", MEDIA_ROOT)
+print("MEDIA_ROOT =", MEDIA_ROOT)
 
 FFMPEG = "ffmpeg"
 
@@ -38,7 +38,7 @@ FONT_CACHE_DIR = os.path.join(MEDIA_ROOT, "font_cache")
 # ---------------------------------------------------------
 
 def abs_media_path(path: str) -> str:
-    print("🔍 abs_media_path input:", path)
+    print("abs_media_path input:", path)
 
     path = path.replace("\\", "/")
 
@@ -51,12 +51,12 @@ def abs_media_path(path: str) -> str:
 
     full_path = os.path.join(MEDIA_ROOT, path)
 
-    print("✅ abs_media_path resolved:", full_path)
+    print("abs_media_path resolved:", full_path)
     return full_path
 
 def ensure_file_exists(path: str):
     if not os.path.exists(path):
-        raise FileNotFoundError(f"❌ Media file not found: {path}")
+        raise FileNotFoundError(f"Media file not found: {path}")
 
 def parse_position(value):
     """
@@ -242,7 +242,8 @@ def wrap_text(text, max_width, font_size, letter_spacing, word_wrap, word_break)
     if not max_width or max_width <= 0:
         max_width = font_size * 15   # 👈 FORCE DEFAULT WRAP WIDTH
 
-    avg_char = max(1.0, (font_size * 0.6) + max(0.0, letter_spacing))
+    # Increased multiplier from 0.6 to 0.85 to be more conservative for wide chars/caps
+    avg_char = max(1.0, (font_size * 0.85) + max(0.0, letter_spacing))
     max_chars = max(1, int(max_width / avg_char))
     allow_break = str(word_wrap).lower() in ("break-word", "anywhere") or str(word_break).lower() in ("break-all", "break-word", "anywhere")
     break_all = str(word_break).lower() == "break-all"
@@ -713,7 +714,7 @@ def render_video(task_id: str):
         output_path
     ]
 
-    print("🎬 SIMPLE CMD:", " ".join(cmd))
+    print("SIMPLE CMD:", " ".join(cmd))
     subprocess.run(cmd, check=True)
 
     return output_path
