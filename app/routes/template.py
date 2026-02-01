@@ -183,21 +183,33 @@ def get_nested_value(data: dict, path: str):
     except Exception:
         return ""
 
-def replace_placeholders(template_json: dict, customer: dict) -> dict:
-    template_str = json.dumps(template_json)
+# def replace_placeholders(template_json: dict, customer: dict) -> dict:
+#     template_str = json.dumps(template_json)
 
-    replacements = {
-        "{{customer_company_name}}": customer.get("customer_company_name", ""),
-        "{{full_name}}": customer.get("full_name", ""),
-        "{{city}}": customer.get("city", ""),
-        "{{phone_number}}": customer.get("phone_number", "")
-    }
+#     replacements = {
+#         "{{customer_company_name}}": customer.get("customer_company_name", ""),
+#         "{{full_name}}": customer.get("full_name", ""),
+#         "{{city}}": customer.get("city", ""),
+#         "{{phone_number}}": customer.get("phone_number", "")
+#     }
 
-    for key, value in replacements.items():
-        template_str = template_str.replace(key, value)
+#     for key, value in replacements.items():
+#         template_str = template_str.replace(key, value)
 
-    return json.loads(template_str)
+#     return json.loads(template_str)
+
+def replace_placeholders(design_json, customer):
+    # JSON ko string mein convert karke replace karna sabse easy hai
+    json_str = json.dumps(design_json)
     
+    # Agar customer mein 'first_name' hai, toh {{first_name}} replace hoga
+    for key, value in customer.items():
+        placeholder = "{{" + key + "}}"
+        json_str = json_str.replace(placeholder, str(value))
+        
+    return json.loads(json_str)
+    
+     
 @router.post("/{template_id}/preview/{customer_id}")
 async def preview_template_customer(template_id: str, customer_id: str):
 
