@@ -58,6 +58,11 @@ def ensure_file_exists(path: str):
     if not os.path.exists(path):
         raise FileNotFoundError(f"Media file not found: {path}")
 
+def replace_placeholders(text: str, customer: dict) -> str:
+    for key, value in customer.items():
+        text = text.replace(f"{{{{{key}}}}}", value)
+    return text
+
 # Function to parse position values
 # Handles strings with 'px' suffix and converts to float
 # Returns 0.0 for invalid values
@@ -362,7 +367,7 @@ def parse_shadow_string(value):
         return {"x": nums[0], "y": nums[1], "color": color or "#000000"}
     return None
 
-def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, canvas_w=None, canvas_h=None):
+def add_text_item_filters(filter_parts, last_label, item, duration, text_idx,customer, canvas_w=None, canvas_h=None):
     details = item.get("details", {})
     display = item.get("display", {})
     
@@ -370,7 +375,11 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, ca
     end = display.get("to", duration * 1000) / 1000
     
     scale_val = parse_scale(details.get("transform", "scale(1)"))
-    raw_text = details.get("text", "")
+    raw_text = item.get("details", {}).get("text", "")
+
+    for key, value in customer.items():
+        raw_text = raw_text.replace(f"{{{{{key}}}}}", value)
+    print("TEXT AFTER REPLACE:", raw_text)
     font_size = int(details.get("fontSize", 40) * scale_val)
     font_size = min(font_size, 200)  # Limit to 200px maximum
     opacity = float(details.get("opacity", 100)) / 100.0
@@ -568,19 +577,7 @@ def generate_ffmpeg_cmd(template):
         last_label = f"[o{idx}]"
         video_labels.append(last_label)
     
-    # 3️⃣ Process all text items
-    text_items = [tid for tid in design['trackItemIds'] if track_map[tid]['type']=='text']
-    txt_count = 0
-    for idx, txt_id in enumerate(text_items):
-        item = track_map[txt_id]
-        item["details"]["_canvas_width"] = canvas_w
-        last_label, txt_count = add_text_item_filters(
-            filter_parts,
-            last_label,
-            item,
-            duration,
-            txt_count,
-        )
+   
     
     # 4️⃣ Process all image items
     image_items = [tid for tid in design['trackItemIds'] if track_map[tid]['type']=='image']
@@ -688,11 +685,11 @@ def safe_float(val):
     except (ValueError, IndexError):
         return 0.0
 
-def render_preview(template, output_path):
-    design = template.get("template_json", {}).get("design", {})
+def render_preview(template_json, customer, output_path):
+    design = template_json.get("design", {})
     track_items_map = design.get("trackItemsMap", {})
     tracks = design.get("tracks", [])
-    duration = float(template.get("duration", 10))
+    duration = float(template_json.get("duration", 10))
     canvas_w, canvas_h = resolve_canvas_size(design)
     fps = resolve_fps(design)
     
@@ -784,17 +781,19 @@ def render_preview(template, output_path):
         if track.get("type") == "text":
             for item_id in track.get("items", []):
                 item = track_items_map.get(item_id, {})
+                print("caling add to text func")
                 last_label, txt_idx = add_text_item_filters(
                     filter_parts,
                     last_label,
                     item,
                     duration,
                     txt_idx,
+                    customer,
                     canvas_w=canvas_w,  # Add canvas dimensions
                     canvas_h=canvas_h,
                 )
 
-    # 5. AUDIO MIXING (video + external)
+    # 5. AUDIO MIXING
     audio_mix_filter = ""
     audio_sources = []
     for i, v in enumerate(visual_inputs):
