@@ -370,67 +370,164 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, ca
     end = display.get("to", duration * 1000) / 1000
     
     scale_val = parse_scale(details.get("transform", "scale(1)"))
-    raw_text = details.get("text", "") # Yahan replaced customer data aayega
-    
+    raw_text = details.get("text", "")
     font_size = int(details.get("fontSize", 40) * scale_val)
+    font_size = min(font_size, 200)  # Limit to 200px maximum
     opacity = float(details.get("opacity", 100)) / 100.0
+    letter_spacing = parse_px(details.get("letterSpacing", 0)) if details.get("letterSpacing") not in (None, "normal") else 0.0
+    letter_spacing = letter_spacing * scale_val
+    line_spacing = compute_line_spacing(details.get("lineHeight", "normal"), font_size)
     
-    # 1. Box Width logic (Wrapping ke liye zaroori hai)
+    # FIX: Properly initialize max_width with proper scoping
     raw_width = details.get("width")
-    max_width = 0
-    if raw_width not in (None, "", 0, "0", "0px"):
-        max_width = float(parse_px(raw_width)) * scale_val
+    max_width = 0  # Initialize first
+    
+    try:
+        if raw_width not in (None, "", 0, "0", "0px"):
+            max_width = float(parse_px(raw_width)) * scale_val
+    except Exception as e:
+        print(f"Warning: Could not parse width '{raw_width}': {e}")
+        max_width = 0.0
+    # Don't multiply again - that was causing the issue
+    # if max_width:
+    #     max_width = max_width * scale_val  # REMOVE THIS LINE
+    
+    word_wrap = details.get("wordWrap", "normal")
+    word_break = details.get("wordBreak", "normal")
 
-    # 2. Text Wrapping (Fixes text going out of screen)
-    wrapped_text = wrap_text(raw_text, max_width, font_size, 0, 
-                             details.get("wordWrap", "normal"), 
-                             details.get("wordBreak", "normal"), 
-                             canvas_width=canvas_w)
+      # DEBUG: Print values to see what's happening
+    print(f"DEBUG: raw_text={raw_text[:50] if raw_text else ''}, max_width={max_width}, font_size={font_size}")
+    
+    # Now max_width is properly initialized
+    wrapped_text = wrap_text(
+        raw_text,
+        max_width,
+        font_size,
+        letter_spacing,
+        word_wrap,
+        word_break,
+        canvas_width=canvas_w,  # Use canvas_w parameter
+    )
+    
+    textfile_path = ""
+    try:
+        textfile_path = write_text_temp(wrapped_text)
+    except Exception:
+        textfile_path = ""
     
     text = ffmpeg_escape_text(wrapped_text)
     
-    # 3. POSITIONING CONSTANTS
     left = parse_px(details.get("left", 0))
     top = parse_px(details.get("top", 0))
+    text_box_w = parse_px(details.get("width", 0)) * scale_val if details.get("width") else 0
     text_box_h = parse_px(details.get("height", 0)) * scale_val if details.get("height") else 0
-
-    # 4. ALIGNMENT LOGIC (Crucial Fix)
+    
+    if text_box_w:
+        left = left + (parse_px(details.get("width", 0)) - text_box_w) / 2
+    if text_box_h:
+        top = top + (parse_px(details.get("height", 0)) - text_box_h) / 2
+    
     align = str(details.get("textAlign", "left")).lower()
     
-    if align == "center":
-        # Formula: Agar box width hai toh (left + (box_w - text_w)/2)
-        # Agar box width nahi hai toh pure canvas ke center mein (canvas_w - text_w)/2
-        if max_width > 0:
-            x_expr = f"({left}+({max_width}-text_w)/2)"
+    if max_width > 0 and align in ("center", "right"):
+        if align == "center":
+            x_expr = f"{left}+({max_width}-text_w)/2"
         else:
-            x_expr = f"({canvas_w}-text_w)/2"
-    elif align == "right":
-        x_expr = f"({left}+{max_width}-text_w)" if max_width > 0 else f"({canvas_w}-text_w)"
+            x_expr = f"{left}+{max_width}-text_w"
     else:
-        x_expr = f"{left}"
-
-    # Vertical centering inside the text box height
-    y_expr = f"({top}+({text_box_h}-text_h)/2)" if text_box_h > 0 else f"{top}"
-
-    # 5. FFmpeg DRAWTEXT PARAMS
+        x_expr = f"{left}"  
+    
+    if text_box_h:
+        y_expr = f"{top} + ({text_box_h} - text_h)/2"
+    else:
+        y_expr = f"{top}"
+    
     font_path = resolve_font_file(details)
     text_color = ffmpeg_color(parse_color(details.get("color", "#ffffff")), opacity)
+    bg_color = parse_color(details.get("backgroundColor", "transparent"))
+    bg_color_str = ffmpeg_color(bg_color, opacity)
+    
+    text_source = f"text='{text}'"
+    if textfile_path:
+        text_source = f"textfile='{ffmpeg_escape_path(textfile_path)}'"
     
     base_params = [
         f"fontfile='{ffmpeg_escape_path(font_path)}'",
-        f"text='{text}'",
+        text_source,
         f"x={x_expr}",
         f"y={y_expr}",
         f"fontsize={font_size}",
         f"fontcolor={text_color}",
-        "fix_bounds=1" # Prevent text from clipping out of the video frame
+        "fix_bounds=1"
     ]
     
+    if letter_spacing:
+        base_params.append(f"letter_spacing={int(letter_spacing)}")
+    
+    if line_spacing is not None:
+        base_params.append(f"line_spacing={int(line_spacing)}")
+    
+    if bg_color[3] > 0:
+        base_params.append("box=1")
+        base_params.append(f"boxcolor={bg_color_str}")
+    
+    border_width = details.get("borderWidth", 0)
+    border_color = details.get("borderColor", "transparent")
+    if border_width and border_color and border_color != "transparent":
+        base_params.append(f"borderw={int(border_width)}")
+        base_params.append(f"bordercolor={ffmpeg_color(parse_color(border_color), opacity)}")
+    
+    shadows = []
+    text_shadow = parse_shadow_string(details.get("textShadow", "none"))
+    if text_shadow:
+        text_shadow["x"] = text_shadow.get("x", 0) * scale_val
+        text_shadow["y"] = text_shadow.get("y", 0) * scale_val
+        shadows.append(text_shadow)
+    
+    box_shadow = details.get("boxShadow")
+    if isinstance(box_shadow, dict):
+        shadow_color = box_shadow.get("color", "#000000")
+        shadow_x = box_shadow.get("x", 0) * scale_val
+        shadow_y = box_shadow.get("y", 0) * scale_val
+        if shadow_x or shadow_y:
+            shadows.append({
+                "x": shadow_x,
+                "y": shadow_y,
+                "color": shadow_color,
+            })
+    
+    current_label = last_label
+    for s_idx, shadow in enumerate(shadows):
+        shadow_x = shadow.get("x", 0) if shadow else 0
+        shadow_y = shadow.get("y", 0) if shadow else 0
+        shadow_color = ffmpeg_color(parse_color(shadow.get("color", "#000000")), opacity)
+        shadow_label = f"[txt_shadow{text_idx}_{s_idx}]"
+        shadow_params = [
+            f"fontfile='{ffmpeg_escape_path(font_path)}'",
+            text_source,
+            f"x=({x_expr})+{shadow_x}",
+            f"y=({y_expr})+{shadow_y}",
+            f"fontsize={font_size}",
+            f"fontcolor={shadow_color}",
+        ]
+        
+        if letter_spacing:
+            shadow_params.append(f"letter_spacing={int(letter_spacing)}")
+        if line_spacing is not None:
+            shadow_params.append(f"line_spacing={int(line_spacing)}")
+        
+        filter_parts.append(
+            f"{current_label}drawtext={':'.join(shadow_params)}:enable='between(t,{start},{end})'{shadow_label}"
+        )
+        current_label = shadow_label
+    
     out_label = f"[out_txt{text_idx}]"
-    filter_parts.append(f"{last_label}drawtext={':'.join(base_params)}:enable='between(t,{start},{end})'{out_label}")
+    filter_parts.append(
+        f"{current_label}drawtext={':'.join(base_params)}:enable='between(t,{start},{end})'{out_label}"
+    )
     
     return out_label, text_idx + 1
-    
+
 # ---------------------------------------------------------
 # MAIN RENDER FUNCTION
 # ---------------------------------------------------------
