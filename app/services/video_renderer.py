@@ -18,11 +18,7 @@ load_dotenv()
 # CONFIG
 # ---------------------------------------------------------
 DEBUG = os.getenv("DEBUG", "False").lower() == "true" 
-
 MEDIA_ROOT = os.getenv("MEDIA_ROOT", "media")
-
-print("MEDIA_ROOT =", MEDIA_ROOT)
-
 FFMPEG = "ffmpeg"
 
 BASE_DIR = os.path.dirname(
@@ -37,9 +33,11 @@ FONT_CACHE_DIR = os.path.join(MEDIA_ROOT, "font_cache")
 # HELPERS
 # ---------------------------------------------------------
 
+# Function to compute absolute media path
+# Converts relative paths to absolute paths based on MEDIA_ROOT
+# Raises ValueError for remote URLs
+# Logs input and resolved paths for debugging
 def abs_media_path(path: str) -> str:
-    print("abs_media_path input:", path)
-
     path = path.replace("\\", "/")
 
     if path.startswith("http"):
@@ -48,16 +46,21 @@ def abs_media_path(path: str) -> str:
     path = path.replace("./media/", "")
     path = path.replace("media/", "")
     path = path.lstrip("/")
-
-    full_path = os.path.join(MEDIA_ROOT, path)
-
-    print("abs_media_path resolved:", full_path)
+    media_root = MEDIA_ROOT.replace("\\", "/")
+    full_path = os.path.join(media_root, path)
+    full_path = full_path.replace("\\", "/")
+    
     return full_path
 
+# Function to ensure a file exists at the given path
+# Raises FileNotFoundError if the file does not exist
 def ensure_file_exists(path: str):
     if not os.path.exists(path):
         raise FileNotFoundError(f"Media file not found: {path}")
 
+# Function to parse position values
+# Handles strings with 'px' suffix and converts to float
+# Returns 0.0 for invalid values
 def parse_position(value):
     """
     Convert position value to float:
@@ -84,6 +87,8 @@ def ffmpeg_escape_path(path: str) -> str:
     # Windows-safe FFmpeg path
     return path.replace("\\", "/").replace(":", "\\:")
 
+# Function to escape text for FFmpeg compatibility
+# Escapes special characters like ':', '\', and '%'
 def ffmpeg_escape_text(text: str) -> str:
     return (
         text.replace("\\", "\\\\")
@@ -180,71 +185,128 @@ def download_font(font_url: str) -> str:
         f.write(resp.content)
     return font_path
 
+# Resolve font file paths
+# Download fonts from URLs or map common font names to local files
+# Fallback to Arial if no match is found
 def resolve_font_file(details: Dict[str, Any]) -> str:
     font_url = details.get("fontUrl") or details.get("fontURL")
     if font_url:
         try:
-            return download_font(font_url).replace("\\", "/")
+            font_path = download_font(font_url)
+            if os.path.exists(font_path):
+                return font_path.replace("\\", "/")
         except Exception:
-            return FONT_PATH
-    font_family = details.get("fontFamily")
-    if isinstance(font_family, str) and font_family:
-        if os.path.isabs(font_family) and os.path.exists(font_family):
-            return font_family.replace("\\", "/")
-        fonts_dir = os.path.join(BASE_DIR, "Fonts")
-        if os.path.isdir(fonts_dir):
-            family_lower = font_family.lower()
-            weight = str(details.get("fontWeight", "")).lower()
-            style = str(details.get("fontStyle", "")).lower()
-            candidates = []
-            for name in os.listdir(fonts_dir):
-                if not name.lower().endswith((".ttf", ".otf")):
-                    continue
-                name_lower = name.lower()
-                if family_lower in name_lower:
-                    candidates.append(os.path.join(fonts_dir, name))
-            if candidates:
-                if weight or style:
-                    for cand in candidates:
-                        cand_lower = os.path.basename(cand).lower()
-                        if weight and weight not in cand_lower:
-                            continue
-                        if style and style not in cand_lower:
-                            continue
-                        return cand.replace("\\", "/")
-                return candidates[0].replace("\\", "/")
-    return FONT_PATH
+            pass
+    
+    font_family = details.get("fontFamily", "arial")
+    
+    # Convert to lowercase for comparison
+    font_family_lower = str(font_family).lower()
+    
+    # Common font mappings
+    font_mappings = {
+        "arial": "arial.ttf",
+        "helvetica": "arial.ttf",  # Helvetica often mapped to Arial
+        "times new roman": "times.ttf",
+        "times": "times.ttf",
+        "courier new": "cour.ttf",
+        "verdana": "verdana.ttf",
+        "tahoma": "tahoma.ttf",
+        "georgia": "georgia.ttf",
+    }
+    
+    # Check mapped fonts
+    if font_family_lower in font_mappings:
+        font_file = font_mappings[font_family_lower]
+        font_path = os.path.join(BASE_DIR, "Fonts", font_file)
+        if os.path.exists(font_path):
+            return font_path.replace("\\", "/")
+    
+    # Try direct file search
+    fonts_dir = os.path.join(BASE_DIR, "Fonts")
+    if os.path.isdir(fonts_dir):
+        # Search for font files containing the family name
+        font_files = []
+        for file in os.listdir(fonts_dir):
+            if file.lower().endswith(('.ttf', '.otf')):
+                if font_family_lower in file.lower():
+                    font_files.append(os.path.join(fonts_dir, file))
+        
+        if font_files:
+            # Return the first found font
+            return font_files[0].replace("\\", "/")
+    
+    # Ultimate fallback to arial
+    font_path = os.path.join(BASE_DIR, "Fonts", "arial.ttf")
+    if os.path.exists(font_path):
+        return font_path.replace("\\", "/")
+    
+    # If arial doesn't exist, return empty string (FFmpeg will use default)
+    return ""
 
 def compute_line_spacing(line_height, font_size):
+    """
+    Calculate line spacing based on line-height value.
+    Handles: 'normal', '24px', '1.5', 1.2, etc.
+    Returns: spacing value in pixels (can be negative for tight spacing)
+    """
     if line_height in (None, "", "normal"):
-        return None
+        # Browser default 'normal' is typically 1.2em
+        return int(font_size * 1.2 - font_size)  # Returns spacing between lines
+    
     try:
-        if isinstance(line_height, str) and line_height.endswith("px"):
-            px_val = parse_px(line_height)
-            return max(0, int(px_val - font_size))
+        if isinstance(line_height, str):
+            # Remove 'px' if present
+            line_height = line_height.strip().lower()
+            if line_height.endswith("px"):
+                px_val = float(line_height.replace("px", ""))
+                return int(px_val - font_size)  # Return spacing (total height - font_size)
+            elif line_height == "normal":
+                return int(font_size * 0.2)  # 1.2em - 1em = 0.2em spacing
+        
+        # Handle numeric values (em-based or unitless)
         val = float(line_height)
+        if val < 1:  # Too small, probably invalid
+            return int(font_size * 0.2)
+        elif val < 3:  # Likely em-based (1.2, 1.5, etc.)
+            return int(font_size * val - font_size)
+        else:  # Pixel value
+            return int(val - font_size)
+            
     except Exception:
-        return None
-    if val <= 0:
-        return None
-    if val < 3:
-        return max(0, int(font_size * (val - 1.0)))
-    return max(0, int(val - font_size))
+        # Fallback to reasonable default
+        return int(font_size * 0.2)
 
-def wrap_text(text, max_width, font_size, letter_spacing, word_wrap, word_break):
-    if not text:
+def wrap_text(
+    text,
+    max_width,
+    font_size,
+    letter_spacing,
+    word_wrap,
+    word_break,
+    canvas_width=None,
+):
+    if not text or font_size <= 0:
         return text
-    # if not max_width or max_width <= 0 or font_size <= 0:
-    #     return text
-    if font_size <= 0:
-        return text
+    
+    if max_width is None:
+        max_width = 0
 
-    if not max_width or max_width <= 0:
-        max_width = font_size * 15   # 👈 FORCE DEFAULT WRAP WIDTH
+    # FIX: Ensure canvas_width is properly handled
+    if max_width and max_width > 0:
+        effective_width = max_width
+    else:
+        # Fallback ONLY when width is missing
+        # FIX: Ensure canvas_width is not None
+        # canvas_width_val = canvas_width or 1920  # Default if None
+        effective_width = int((canvas_width or 1920) * 0.7)
 
-    # Increased multiplier from 0.6 to 0.85 to be more conservative for wide chars/caps
-    avg_char = max(1.0, (font_size * 0.85) + max(0.0, letter_spacing))
-    max_chars = max(1, int(max_width / avg_char))
+    avg_char = max(
+        1.0,
+        (font_size * 0.6) + max(0.0, letter_spacing * 0.5)
+    )
+
+    max_chars = max(1, int(effective_width / avg_char))
     allow_break = str(word_wrap).lower() in ("break-word", "anywhere") or str(word_break).lower() in ("break-all", "break-word", "anywhere")
     break_all = str(word_break).lower() == "break-all"
     lines = []
@@ -300,101 +362,128 @@ def parse_shadow_string(value):
         return {"x": nums[0], "y": nums[1], "color": color or "#000000"}
     return None
 
-def add_text_item_filters(filter_parts, last_label, item, duration, text_idx):
+def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, canvas_w=None, canvas_h=None):
     details = item.get("details", {})
     display = item.get("display", {})
-
+    
     start = display.get("from", 0) / 1000
     end = display.get("to", duration * 1000) / 1000
-
+    
     scale_val = parse_scale(details.get("transform", "scale(1)"))
     raw_text = details.get("text", "")
     font_size = int(details.get("fontSize", 40) * scale_val)
+    font_size = min(font_size, 200)  # Limit to 200px maximum
     opacity = float(details.get("opacity", 100)) / 100.0
     letter_spacing = parse_px(details.get("letterSpacing", 0)) if details.get("letterSpacing") not in (None, "normal") else 0.0
     letter_spacing = letter_spacing * scale_val
     line_spacing = compute_line_spacing(details.get("lineHeight", "normal"), font_size)
-
-    # max_width = parse_px(details.get("width", 0)) if details.get("width") not in (None, "") else 0
-    # max_width = max_width * scale_val
-    # TEXT WIDTH RESOLUTION (Canvas fallback)
+    
+    # FIX: Properly initialize max_width with proper scoping
     raw_width = details.get("width")
-
-    if raw_width in (None, "", 0):
-        canvas_w = details.get("_canvas_width", 1920)
-        left_pos = parse_px(details.get("left", 0))
-        max_width = max(100, canvas_w - left_pos - 40)
-    else:
-        max_width = parse_px(raw_width)
-
-    max_width = max_width * scale_val
-
-    if max_width in (None, "", 0):
-        # Agar width nahi di hai → canvas ke andar fit karo
-        canvas_width = details.get("_canvas_width", 1920)
-        left_pos = parse_px(details.get("left", 0))
-        max_width = max(50, canvas_width - left_pos - 20)
-    else:
-        max_width = parse_px(max_width)
-
-    max_width = max_width * scale_val
-
+    max_width = 0  # Initialize first
+    
+    try:
+        if raw_width not in (None, "", 0, "0", "0px"):
+            max_width = float(parse_px(raw_width)) * scale_val
+    except Exception as e:
+        print(f"Warning: Could not parse width '{raw_width}': {e}")
+        max_width = 0.0
+    # Don't multiply again - that was causing the issue
+    # if max_width:
+    #     max_width = max_width * scale_val  # REMOVE THIS LINE
+    
     word_wrap = details.get("wordWrap", "normal")
     word_break = details.get("wordBreak", "normal")
-    wrapped_text = wrap_text(raw_text, max_width, font_size, letter_spacing, word_wrap, word_break)
-    text = ffmpeg_escape_text(wrapped_text)
 
+      # DEBUG: Print values to see what's happening
+    print(f"DEBUG: raw_text={raw_text[:50] if raw_text else ''}, max_width={max_width}, font_size={font_size}")
+    
+    # Now max_width is properly initialized
+    wrapped_text = wrap_text(
+        raw_text,
+        max_width,
+        font_size,
+        letter_spacing,
+        word_wrap,
+        word_break,
+        canvas_width=canvas_w,  # Use canvas_w parameter
+    )
+    
+    textfile_path = ""
+    try:
+        textfile_path = write_text_temp(wrapped_text)
+    except Exception:
+        textfile_path = ""
+    
+    text = ffmpeg_escape_text(wrapped_text)
+    
     left = parse_px(details.get("left", 0))
     top = parse_px(details.get("top", 0))
-    text_box_w = parse_px(details.get("width", 0)) if details.get("width") not in (None, "") else 0
-    text_box_h = parse_px(details.get("height", 0)) if details.get("height") not in (None, "") else 0
+    text_box_w = parse_px(details.get("width", 0)) * scale_val if details.get("width") else 0
+    text_box_h = parse_px(details.get("height", 0)) * scale_val if details.get("height") else 0
+    
     if text_box_w:
-        left = left + (text_box_w - (text_box_w * scale_val)) / 2
+        left = left + (parse_px(details.get("width", 0)) - text_box_w) / 2
     if text_box_h:
-        top = top + (text_box_h - (text_box_h * scale_val)) / 2
+        top = top + (parse_px(details.get("height", 0)) - text_box_h) / 2
+    
     align = str(details.get("textAlign", "left")).lower()
+    
     if max_width > 0 and align in ("center", "right"):
         if align == "center":
             x_expr = f"{left}+({max_width}-text_w)/2"
         else:
             x_expr = f"{left}+{max_width}-text_w"
     else:
-        x_expr = f"{left}"
-    y_expr = f"{top}"
-
+        x_expr = f"{left}"  
+    
+    if text_box_h:
+        y_expr = f"{top} + ({text_box_h} - text_h)/2"
+    else:
+        y_expr = f"{top}"
+    
     font_path = resolve_font_file(details)
     text_color = ffmpeg_color(parse_color(details.get("color", "#ffffff")), opacity)
     bg_color = parse_color(details.get("backgroundColor", "transparent"))
     bg_color_str = ffmpeg_color(bg_color, opacity)
-
+    
+    text_source = f"text='{text}'"
+    if textfile_path:
+        text_source = f"textfile='{ffmpeg_escape_path(textfile_path)}'"
+    
     base_params = [
         f"fontfile='{ffmpeg_escape_path(font_path)}'",
-        f"text='{text}'",
+        text_source,
         f"x={x_expr}",
         f"y={y_expr}",
         f"fontsize={font_size}",
         f"fontcolor={text_color}",
+        "fix_bounds=1"
     ]
+    
     if letter_spacing:
         base_params.append(f"letter_spacing={int(letter_spacing)}")
+    
     if line_spacing is not None:
         base_params.append(f"line_spacing={int(line_spacing)}")
+    
     if bg_color[3] > 0:
         base_params.append("box=1")
         base_params.append(f"boxcolor={bg_color_str}")
-
+    
     border_width = details.get("borderWidth", 0)
     border_color = details.get("borderColor", "transparent")
     if border_width and border_color and border_color != "transparent":
         base_params.append(f"borderw={int(border_width)}")
         base_params.append(f"bordercolor={ffmpeg_color(parse_color(border_color), opacity)}")
-
+    
     shadows = []
     text_shadow = parse_shadow_string(details.get("textShadow", "none"))
     if text_shadow:
         text_shadow["x"] = text_shadow.get("x", 0) * scale_val
         text_shadow["y"] = text_shadow.get("y", 0) * scale_val
         shadows.append(text_shadow)
+    
     box_shadow = details.get("boxShadow")
     if isinstance(box_shadow, dict):
         shadow_color = box_shadow.get("color", "#000000")
@@ -406,7 +495,7 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx):
                 "y": shadow_y,
                 "color": shadow_color,
             })
-
+    
     current_label = last_label
     for s_idx, shadow in enumerate(shadows):
         shadow_x = shadow.get("x", 0) if shadow else 0
@@ -415,28 +504,29 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx):
         shadow_label = f"[txt_shadow{text_idx}_{s_idx}]"
         shadow_params = [
             f"fontfile='{ffmpeg_escape_path(font_path)}'",
-            f"text='{text}'",
+            text_source,
             f"x=({x_expr})+{shadow_x}",
             f"y=({y_expr})+{shadow_y}",
             f"fontsize={font_size}",
             f"fontcolor={shadow_color}",
         ]
+        
         if letter_spacing:
             shadow_params.append(f"letter_spacing={int(letter_spacing)}")
         if line_spacing is not None:
             shadow_params.append(f"line_spacing={int(line_spacing)}")
+        
         filter_parts.append(
             f"{current_label}drawtext={':'.join(shadow_params)}:enable='between(t,{start},{end})'{shadow_label}"
         )
         current_label = shadow_label
-
+    
     out_label = f"[out_txt{text_idx}]"
     filter_parts.append(
         f"{current_label}drawtext={':'.join(base_params)}:enable='between(t,{start},{end})'{out_label}"
     )
+    
     return out_label, text_idx + 1
-
-
 
 # ---------------------------------------------------------
 # MAIN RENDER FUNCTION
@@ -559,6 +649,25 @@ def normalize_media_src(src: str) -> str:
         return src
     return abs_media_path(src)
 
+def write_text_temp(text: str) -> str:
+    ensure_dir(MEDIA_ROOT)
+    name = f"text_{uuid.uuid4().hex}.txt"
+    path = os.path.join(MEDIA_ROOT, name)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text or "")
+    return path
+
+def to_even(value, min_value=2):
+    try:
+        v = int(round(float(value)))
+    except Exception:
+        v = min_value
+    if v < min_value:
+        v = min_value
+    if v % 2 != 0:
+        v += 1
+    return v
+
 def parse_px(value):
     """Handles '123.45px', numeric values, and list-like strings"""
     if isinstance(value, str):
@@ -569,7 +678,6 @@ def parse_px(value):
         except:
             return 0.0
     return float(value) if value is not None else 0.0
-
 
 def safe_float(val):
     """Handles '10px', '0.32, 0.32', and None values safely."""
@@ -652,6 +760,8 @@ def render_preview(template, output_path):
                     item,
                     duration,
                     txt_idx,
+                    canvas_w=canvas_w,  # Add canvas dimensions
+                    canvas_h=canvas_h,
                 )
 
     # 5. AUDIO MIXING
