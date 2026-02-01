@@ -577,19 +577,7 @@ def generate_ffmpeg_cmd(template):
         last_label = f"[o{idx}]"
         video_labels.append(last_label)
     
-    # 3️⃣ Process all text items
-    # text_items = [tid for tid in design['trackItemIds'] if track_map[tid]['type']=='text']
-    # txt_count = 0
-    # for idx, txt_id in enumerate(text_items):
-    #     item = track_map[txt_id]
-    #     item["details"]["_canvas_width"] = canvas_w
-    #     last_label, txt_count = add_text_item_filters(
-    #         filter_parts,
-    #         last_label,
-    #         item,
-    #         duration,
-    #         txt_count,
-    #     )
+   
     
     # 4️⃣ Process all image items
     image_items = [tid for tid in design['trackItemIds'] if track_map[tid]['type']=='image']
@@ -697,11 +685,11 @@ def safe_float(val):
     except (ValueError, IndexError):
         return 0.0
 
-def render_preview(template,customer, output_path):
-    design = template.get("template_json", {}).get("design", {})
+def render_preview(template_json, customer, output_path):
+    design = template_json.get("design", {})
     track_items_map = design.get("trackItemsMap", {})
     tracks = design.get("tracks", [])
-    duration = float(template.get("duration", 10))
+    duration = float(template_json.get("duration", 10))
     canvas_w, canvas_h = resolve_canvas_size(design)
     fps = resolve_fps(design)
     
@@ -763,6 +751,7 @@ def render_preview(template,customer, output_path):
         if track.get("type") == "text":
             for item_id in track.get("items", []):
                 item = track_items_map.get(item_id, {})
+                print("caling add to text func")
                 last_label, txt_idx = add_text_item_filters(
                     filter_parts,
                     last_label,
@@ -773,6 +762,8 @@ def render_preview(template,customer, output_path):
                     canvas_w=canvas_w,  # Add canvas dimensions
                     canvas_h=canvas_h,
                 )
+
+                print("after add to text func",last_label, txt_idx)
 
     # 5. AUDIO MIXING
     audio_mix_filter = ""
