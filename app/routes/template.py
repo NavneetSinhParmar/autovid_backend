@@ -208,6 +208,17 @@ def replace_placeholders(data, customer):
     return json.loads(json_str)
 
 
+def normalize_customer(customer: dict) -> dict:
+    safe = {}
+    for k, v in customer.items():
+        if k == "_id":
+            safe["id"] = str(v)
+        elif hasattr(v, "isoformat"):
+            safe[k] = v.isoformat()
+        else:
+            safe[k] = str(v) if v is not None else ""
+    return safe
+
 @router.post("/{template_id}/preview/{customer_id}")
 async def preview_template_customer(template_id: str, customer_id: str):
 
@@ -216,15 +227,10 @@ async def preview_template_customer(template_id: str, customer_id: str):
         raise HTTPException(status_code=404, detail="Template does not exist")
 
     customer = await db.customers.find_one({"_id": ObjectId(customer_id)})
-    print("Customer data:", customer)
     if not customer:
         raise HTTPException(status_code=404, detail="Customer does not exist")
 
-    # 🔹 PLACEHOLDER REPLACEMENT
-    template["template_json"] = replace_placeholders(
-        template["template_json"],
-        customer
-    )
+    customer = normalize_customer(customer)  # ✅ ADD THIS
 
     media_dir = os.path.abspath("media")
     os.makedirs(media_dir, exist_ok=True)
@@ -232,17 +238,18 @@ async def preview_template_customer(template_id: str, customer_id: str):
     preview_filename = f"{template_id}_{customer_id}_preview.mp4"
     preview_path = os.path.join(media_dir, preview_filename)
 
-    try:
-        await run_in_threadpool(render_preview, template, preview_path)
+    await run_in_threadpool(
+        render_preview,
+        template["template_json"],   # ✅ ONLY template_json
+        customer,                    # ✅ normalized customer
+        preview_path
+    )
 
-        return FileResponse(
-            path=preview_path,
-            media_type="video/mp4",
-            filename=preview_filename
-        )
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return FileResponse(
+        preview_path,
+        media_type="video/mp4",
+        filename=preview_filename
+    )
 
 
 @router.get("/{template_id}/download/{customer_id}")
