@@ -198,18 +198,16 @@ def get_nested_value(data: dict, path: str):
 
 #     return json.loads(template_str)
 
-def replace_placeholders(design_json, customer):
-    # JSON ko string mein convert karke replace karna sabse easy hai
-    json_str = json.dumps(design_json)
-    
-    # Agar customer mein 'first_name' hai, toh {{first_name}} replace hoga
+def replace_placeholders(data, customer):
+    # Pure JSON object ko string bana kar replace karna sabse safe hai
+    json_str = json.dumps(data)
     for key, value in customer.items():
-        placeholder = "{{" + key + "}}"
+        # Case-insensitive replacement for {{name}}, {{Name}}, etc.
+        placeholder = "{{" + str(key) + "}}"
         json_str = json_str.replace(placeholder, str(value))
-        
     return json.loads(json_str)
-    
-     
+
+
 @router.post("/{template_id}/preview/{customer_id}")
 async def preview_template_customer(template_id: str, customer_id: str):
 

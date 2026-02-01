@@ -370,72 +370,64 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, ca
     end = display.get("to", duration * 1000) / 1000
     
     scale_val = parse_scale(details.get("transform", "scale(1)"))
-    # Yahan updated text (Rahul Kumar) aayega
-    raw_text = details.get("text", "") 
+    raw_text = details.get("text", "") # Yahan replaced customer data aayega
     
     font_size = int(details.get("fontSize", 40) * scale_val)
     opacity = float(details.get("opacity", 100)) / 100.0
     
-    # 1. Dynamic Width Handling
+    # 1. Box Width logic (Wrapping ke liye zaroori hai)
     raw_width = details.get("width")
     max_width = 0
     if raw_width not in (None, "", 0, "0", "0px"):
         max_width = float(parse_px(raw_width)) * scale_val
 
-    # 2. Text Wrapping (Dynamic length ke liye zaroori hai)
-    wrapped_text = wrap_text(
-        raw_text,
-        max_width,
-        font_size,
-        0,
-        details.get("wordWrap", "normal"),
-        details.get("wordBreak", "normal"),
-        canvas_width=canvas_w
-    )
+    # 2. Text Wrapping (Fixes text going out of screen)
+    wrapped_text = wrap_text(raw_text, max_width, font_size, 0, 
+                             details.get("wordWrap", "normal"), 
+                             details.get("wordBreak", "normal"), 
+                             canvas_width=canvas_w)
     
-    # FFmpeg escaping
     text = ffmpeg_escape_text(wrapped_text)
     
-    # 3. POSITIONING LOGIC
+    # 3. POSITIONING CONSTANTS
     left = parse_px(details.get("left", 0))
     top = parse_px(details.get("top", 0))
     text_box_h = parse_px(details.get("height", 0)) * scale_val if details.get("height") else 0
 
-    # 4. PERFECT CENTER ALIGNMENT FIX
+    # 4. ALIGNMENT LOGIC (Crucial Fix)
     align = str(details.get("textAlign", "left")).lower()
     
     if align == "center":
-        # FFmpeg internal variable 'text_w' use karke center align
+        # Formula: Agar box width hai toh (left + (box_w - text_w)/2)
+        # Agar box width nahi hai toh pure canvas ke center mein (canvas_w - text_w)/2
         if max_width > 0:
-            x_expr = f"{left}+({max_width}-text_w)/2"
+            x_expr = f"({left}+({max_width}-text_w)/2)"
         else:
             x_expr = f"({canvas_w}-text_w)/2"
     elif align == "right":
-        x_expr = f"{left}+{max_width}-text_w" if max_width > 0 else f"{canvas_w}-text_w"
+        x_expr = f"({left}+{max_width}-text_w)" if max_width > 0 else f"({canvas_w}-text_w)"
     else:
         x_expr = f"{left}"
 
-    # Vertical Centering
-    y_expr = f"{top}+({text_box_h}-text_h)/2" if text_box_h > 0 else f"{top}"
+    # Vertical centering inside the text box height
+    y_expr = f"({top}+({text_box_h}-text_h)/2)" if text_box_h > 0 else f"{top}"
 
-    # 5. FFmpeg Filter Build
+    # 5. FFmpeg DRAWTEXT PARAMS
     font_path = resolve_font_file(details)
     text_color = ffmpeg_color(parse_color(details.get("color", "#ffffff")), opacity)
     
     base_params = [
         f"fontfile='{ffmpeg_escape_path(font_path)}'",
-        f"text='{text}'", # Placeholder replaced text yahan jayega
+        f"text='{text}'",
         f"x={x_expr}",
         f"y={y_expr}",
         f"fontsize={font_size}",
         f"fontcolor={text_color}",
-        "fix_bounds=1"
+        "fix_bounds=1" # Prevent text from clipping out of the video frame
     ]
     
     out_label = f"[out_txt{text_idx}]"
-    filter_parts.append(
-        f"{last_label}drawtext={':'.join(base_params)}:enable='between(t,{start},{end})'{out_label}"
-    )
+    filter_parts.append(f"{last_label}drawtext={':'.join(base_params)}:enable='between(t,{start},{end})'{out_label}")
     
     return out_label, text_idx + 1
     
