@@ -1,1118 +1,586 @@
 [
-     "template" : {
-        "company_id": "691c6d686ad325a3e62e7e75",
-        "template_name": "preview video proper test",
-        "category": "Attitude",
-        "base_video_url": [
-            "http://127.0.0.1:8000/media/691c6d686ad325a3e62e7e75/c4cf70de72454287a3c221d6adbe3803_upload.mp4",
-            "http://127.0.0.1:8000/media/691c6d686ad325a3e62e7e75/9df361c6803c4489812a31fdf518aebe_upload.mp4"
-        ],
-        "base_image_url": [
-            "http://127.0.0.1:8000/media/691c6d686ad325a3e62e7e75/951f413d35694d048323af8e40e85e83_upload.jpg",
-            "http://127.0.0.1:8000/media/691c6d686ad325a3e62e7e75/20399e4dbbf349b0a029eab600b33855_upload.jpg",
-            "http://127.0.0.1:8000/media/691c6d686ad325a3e62e7e75/ae6bfd07e71a4366ae7d97e825c20096_upload.jpg"
-        ],
-        "base_audio_url": [
-            "http://127.0.0.1:8000/media/691c6d686ad325a3e62e7e75/70dff9bd4881450187fca7457dab51ac_upload.mp3",
-            "http://127.0.0.1:8000/media/691c6d686ad325a3e62e7e75/110f17a7d62a4350b8da0df07f696160_upload.mp3"
-        ],
-        "duration": 15.993426638194968,
-        "trim": {
-            "start": 0,
-            "end": 15.993426638194968
+  {
+    "company_id": "695de5db61e32ffac0d26487",
+    "template_name": "3 img 2 video 2 text",
+    "category": "Alphabet",
+    "base_video_url": [
+      "./media/695de5db61e32ffac0d26487/be648ac6ebd44d3db6cf989a320d7953_upload.mp4",
+      "./media/695de5db61e32ffac0d26487/a303f2c30ede489882136a7f065d9400_upload.mp4"
+    ],
+    "base_image_url": [
+      "./media/695de5db61e32ffac0d26487/7dd9c5981b864c59aeb3c6a5aa1d658a_upload.jpg",
+      "./media/695de5db61e32ffac0d26487/05bf34680b2645ea938cff350f6aadbe_upload.jpg",
+      "./media/695de5db61e32ffac0d26487/a8804a231ec64112aa9faf4c2add0e54_upload.jpg"
+    ],
+    "base_audio_url": [
+      "./media/695de5db61e32ffac0d26487/66bf67ba21af4d26a358d0008c728290_upload.mp3"
+    ],
+    "duration": 21.64191489361703,
+    "trim": {
+      "start": 0,
+      "end": 21.64191489361703
+    },
+    "template_json": {
+      "design": {
+        "id": "yDlDd25Nj0BYmp",
+        "fps": 30,
+        "size": {
+          "width": 1080,
+          "height": 1920
         },
-        "template_json": {
-            "design": {
-                "id": "ybt2bm6XsDWrLzd4",
-                "fps": 30,
-                "size": {
-                    "width": 1920,
-                    "height": 1080,
-                    "name": "16:9"
-                },
-                "tracks": [
-                    {
-                        "id": "gS0q0Sc7DQIScSlgNEoYO",
-                        "accepts": [
-                            "text",
-                            "image",
-                            "video",
-                            "audio",
-                            "composition",
-                            "caption",
-                            "template",
-                            "customTrack",
-                            "customTrack2",
-                            "illustration",
-                            "custom",
-                            "main",
-                            "shape",
-                            "linealAudioBars",
-                            "radialAudioBars",
-                            "progressFrame",
-                            "progressBar",
-                            "rect",
-                            "progressSquare"
-                        ],
-                        "type": "text",
-                        "items": [
-                            "qXm7PZxLV4Bwvfyy"
-                        ],
-                        "magnetic": false,
-                        "static": false,
-                        "muted": false
-                    },
-                    {
-                        "id": "_UUMCzaeGStt6y4oTzU1D",
-                        "accepts": [
-                            "text",
-                            "image",
-                            "video",
-                            "audio",
-                            "composition",
-                            "caption",
-                            "template",
-                            "customTrack",
-                            "customTrack2",
-                            "illustration",
-                            "custom",
-                            "main",
-                            "shape",
-                            "linealAudioBars",
-                            "radialAudioBars",
-                            "progressFrame",
-                            "progressBar",
-                            "rect",
-                            "progressSquare"
-                        ],
-                        "type": "text",
-                        "items": [
-                            "oMNloVYhGGhazcQY"
-                        ],
-                        "magnetic": false,
-                        "static": false,
-                        "muted": false
-                    },
-                    {
-                        "id": "IbwPFfVamUmgzfxAQwVlq",
-                        "accepts": [
-                            "text",
-                            "image",
-                            "video",
-                            "audio",
-                            "composition",
-                            "caption",
-                            "template",
-                            "customTrack",
-                            "customTrack2",
-                            "illustration",
-                            "custom",
-                            "main",
-                            "shape",
-                            "linealAudioBars",
-                            "radialAudioBars",
-                            "progressFrame",
-                            "progressBar",
-                            "rect",
-                            "progressSquare"
-                        ],
-                        "type": "text",
-                        "items": [
-                            "AvIu0l1xrho0nl5U"
-                        ],
-                        "magnetic": false,
-                        "static": false,
-                        "muted": false
-                    },
-                    {
-                        "id": "2qWtYXvxwGqTs5ASKjxIx",
-                        "accepts": [
-                            "text",
-                            "image",
-                            "video",
-                            "audio",
-                            "composition",
-                            "caption",
-                            "template",
-                            "customTrack",
-                            "customTrack2",
-                            "illustration",
-                            "custom",
-                            "main",
-                            "shape",
-                            "linealAudioBars",
-                            "radialAudioBars",
-                            "progressFrame",
-                            "progressBar",
-                            "rect",
-                            "progressSquare"
-                        ],
-                        "type": "text",
-                        "items": [
-                            "pzbrlECUQ3mrm9ca"
-                        ],
-                        "magnetic": false,
-                        "static": false,
-                        "muted": false
-                    },
-                    {
-                        "id": "OwLrkXUhvwDCY83XYiqJ3",
-                        "accepts": [
-                            "text",
-                            "image",
-                            "video",
-                            "audio",
-                            "composition",
-                            "caption",
-                            "template",
-                            "customTrack",
-                            "customTrack2",
-                            "illustration",
-                            "custom",
-                            "main",
-                            "shape",
-                            "linealAudioBars",
-                            "radialAudioBars",
-                            "progressFrame",
-                            "progressBar",
-                            "rect",
-                            "progressSquare"
-                        ],
-                        "type": "text",
-                        "items": [
-                            "X55h4lwQjp1uaSZh"
-                        ],
-                        "magnetic": false,
-                        "static": false,
-                        "muted": false
-                    },
-                    {
-                        "id": "tGwLtd6hbcCiHuM",
-                        "items": [
-                            "G_Q49QYzzPsg8XLwUsD4h"
-                        ],
-                        "type": "text",
-                        "accepts": [
-                            "text",
-                            "image",
-                            "video",
-                            "audio",
-                            "composition",
-                            "caption",
-                            "template",
-                            "customTrack",
-                            "customTrack2",
-                            "illustration",
-                            "custom",
-                            "main",
-                            "shape",
-                            "linealAudioBars",
-                            "radialAudioBars",
-                            "progressFrame",
-                            "progressBar",
-                            "rect",
-                            "progressSquare"
-                        ],
-                        "muted": false
-                    },
-                    {
-                        "id": "RtendUM8n9geIaiKFW9K0",
-                        "accepts": [
-                            "text",
-                            "image",
-                            "video",
-                            "audio",
-                            "composition",
-                            "caption",
-                            "template",
-                            "customTrack",
-                            "customTrack2",
-                            "illustration",
-                            "custom",
-                            "main",
-                            "shape",
-                            "linealAudioBars",
-                            "radialAudioBars",
-                            "progressFrame",
-                            "progressBar",
-                            "rect",
-                            "progressSquare"
-                        ],
-                        "type": "text",
-                        "items": [
-                            "BI5_naRSc2hHGX4gDz6VC"
-                        ],
-                        "magnetic": false,
-                        "static": false,
-                        "muted": false
-                    },
-                    {
-                        "id": "_QHscIie3yJx4Nc9LokF0",
-                        "accepts": [
-                            "text",
-                            "image",
-                            "video",
-                            "audio",
-                            "composition",
-                            "caption",
-                            "template",
-                            "customTrack",
-                            "customTrack2",
-                            "illustration",
-                            "custom",
-                            "main",
-                            "shape",
-                            "linealAudioBars",
-                            "radialAudioBars",
-                            "progressFrame",
-                            "progressBar",
-                            "rect",
-                            "progressSquare"
-                        ],
-                        "type": "image",
-                        "items": [
-                            "ritlZWcRmgQF8rQ",
-                            "xXEm8U9u5v0S1vp"
-                        ],
-                        "magnetic": false,
-                        "static": false,
-                        "muted": false
-                    },
-                    {
-                        "id": "oYZKAKwDGQmTGleE",
-                        "items": [
-                            "Afi8vLjYdJuhmA"
-                        ],
-                        "type": "video",
-                        "accepts": [
-                            "text",
-                            "image",
-                            "video",
-                            "audio",
-                            "composition",
-                            "caption",
-                            "template",
-                            "customTrack",
-                            "customTrack2",
-                            "illustration",
-                            "custom",
-                            "main",
-                            "shape",
-                            "linealAudioBars",
-                            "radialAudioBars",
-                            "progressFrame",
-                            "progressBar",
-                            "rect",
-                            "progressSquare"
-                        ],
-                        "muted": false
-                    },
-                    {
-                        "id": "YMw2g-4TRbk6duNwXopNw",
-                        "items": [
-                            "iUNPAwUpJE66gxg"
-                        ],
-                        "type": "audio",
-                        "accepts": [
-                            "text",
-                            "image",
-                            "video",
-                            "audio",
-                            "composition",
-                            "caption",
-                            "template",
-                            "customTrack",
-                            "customTrack2",
-                            "illustration",
-                            "custom",
-                            "main",
-                            "shape",
-                            "linealAudioBars",
-                            "radialAudioBars",
-                            "progressFrame",
-                            "progressBar",
-                            "rect",
-                            "progressSquare"
-                        ],
-                        "muted": false
-                    },
-                    {
-                        "id": "FnH9P-sOvaYRA-XA999f-",
-                        "accepts": [
-                            "text",
-                            "image",
-                            "video",
-                            "audio",
-                            "composition",
-                            "caption",
-                            "template",
-                            "customTrack",
-                            "customTrack2",
-                            "illustration",
-                            "custom",
-                            "main",
-                            "shape",
-                            "linealAudioBars",
-                            "radialAudioBars",
-                            "progressFrame",
-                            "progressBar",
-                            "rect",
-                            "progressSquare"
-                        ],
-                        "type": "audio",
-                        "items": [
-                            "K5rPTuTrfOW9z7p"
-                        ],
-                        "magnetic": false,
-                        "static": false,
-                        "muted": false
-                    },
-                    {
-                        "id": "Qf8ciNsltSvDjGXYZmbiJ",
-                        "accepts": [
-                            "text",
-                            "image",
-                            "video",
-                            "audio",
-                            "composition",
-                            "caption",
-                            "template",
-                            "customTrack",
-                            "customTrack2",
-                            "illustration",
-                            "custom",
-                            "main",
-                            "shape",
-                            "linealAudioBars",
-                            "radialAudioBars",
-                            "progressFrame",
-                            "progressBar",
-                            "rect",
-                            "progressSquare"
-                        ],
-                        "type": "video",
-                        "items": [
-                            "CTFTM1lThrdSj78M",
-                            "OiQ68BzTd89UHv"
-                        ],
-                        "magnetic": false,
-                        "static": false,
-                        "muted": false
-                    }
-                ],
-                "trackItemsMap": {
-                    "CTFTM1lThrdSj78M": {
-                        "id": "CTFTM1lThrdSj78M",
-                        "details": {
-                            "width": 1920,
-                            "height": 1080,
-                            "opacity": 100,
-                            "src": "http://127.0.0.1:8000/media/691c6d686ad325a3e62e7e75/c4cf70de72454287a3c221d6adbe3803_upload.mp4",
-                            "volume": 100,
-                            "borderRadius": 0,
-                            "borderWidth": 0,
-                            "borderColor": "#000000",
-                            "boxShadow": {
-                                "color": "#000000",
-                                "x": 0,
-                                "y": 0,
-                                "blur": 0
-                            },
-                            "top": -0.00182,
-                            "left": 0.0033398,
-                            "transform": "scale(1, 1)",
-                            "blur": 0,
-                            "brightness": 100,
-                            "flipX": false,
-                            "flipY": false,
-                            "rotate": "0deg",
-                            "visibility": "visible"
-                        },
-                        "metadata": {
-                            "previewUrl": "https://cdn.designcombo.dev/caption_previews/static_preset1.webp",
-                            "isCustomerField": true,
-                            "isLocked": false,
-                            "dataType": "video",
-                            "fieldPath": "background_video",
-                            "fieldLabel": "Background Video",
-                            "defaultValue": "Background Video"
-                        },
-                        "trim": {
-                            "from": 0,
-                            "to": 5968.085106382977
-                        },
-                        "type": "video",
-                        "name": "video",
-                        "playbackRate": 1,
-                        "display": {
-                            "from": 0,
-                            "to": 5968.085106382977
-                        },
-                        "duration": 30080,
-                        "isMain": false
-                    },
-                    "OiQ68BzTd89UHv": {
-                        "id": "OiQ68BzTd89UHv",
-                        "details": {
-                            "width": 3840,
-                            "height": 2160,
-                            "opacity": 100,
-                            "src": "http://127.0.0.1:8000/media/691c6d686ad325a3e62e7e75/9df361c6803c4489812a31fdf518aebe_upload.mp4",
-                            "volume": 100,
-                            "borderRadius": 0,
-                            "borderWidth": 0,
-                            "borderColor": "#000000",
-                            "boxShadow": {
-                                "color": "#000000",
-                                "x": 0,
-                                "y": 0,
-                                "blur": 0
-                            },
-                            "top": "-540px",
-                            "left": "-960px",
-                            "transform": "scale(0.5)",
-                            "blur": 0,
-                            "brightness": 100,
-                            "flipX": false,
-                            "flipY": false,
-                            "rotate": "0deg",
-                            "visibility": "visible"
-                        },
-                        "metadata": {
-                            "previewUrl": "https://cdn.designcombo.dev/caption_previews/static_preset1.webp",
-                            "isCustomerField": true,
-                            "isLocked": false,
-                            "dataType": "video",
-                            "fieldPath": "background_video",
-                            "fieldLabel": "Background Video",
-                            "defaultValue": "Background Video"
-                        },
-                        "trim": {
-                            "from": 0,
-                            "to": 5106.382978723403
-                        },
-                        "type": "video",
-                        "name": "video",
-                        "playbackRate": 1,
-                        "display": {
-                            "from": 7536.365741336284,
-                            "to": 12642.748720059688
-                        },
-                        "duration": 8766.667,
-                        "isMain": false
-                    },
-                    "Afi8vLjYdJuhmA": {
-                        "id": "Afi8vLjYdJuhmA",
-                        "type": "image",
-                        "name": "image",
-                        "display": {
-                            "from": 6021.276595744681,
-                            "to": 7536.3657413362835
-                        },
-                        "playbackRate": 1,
-                        "details": {
-                            "src": "http://127.0.0.1:8000/media/691c6d686ad325a3e62e7e75/951f413d35694d048323af8e40e85e83_upload.jpg",
-                            "width": 6016,
-                            "height": 4016,
-                            "opacity": 100,
-                            "transform": "scale(0.320391, 0.320391)",
-                            "border": "none",
-                            "borderRadius": 0,
-                            "boxShadow": {
-                                "color": "#000000",
-                                "x": 0,
-                                "y": 0,
-                                "blur": 0
-                            },
-                            "top": -1533.38,
-                            "left": -2033.69,
-                            "borderWidth": 0,
-                            "borderColor": "#000000",
-                            "blur": 0,
-                            "brightness": 100,
-                            "flipX": false,
-                            "flipY": false,
-                            "rotate": "0deg",
-                            "visibility": "visible"
-                        },
-                        "metadata": {
-                            "isCustomerField": true,
-                            "isLocked": false,
-                            "dataType": "image",
-                            "fieldPath": "background_image",
-                            "fieldLabel": "Background Image",
-                            "defaultValue": "Background Image"
-                        }
-                    },
-                    "K5rPTuTrfOW9z7p": {
-                        "id": "K5rPTuTrfOW9z7p",
-                        "name": "audio",
-                        "type": "audio",
-                        "display": {
-                            "from": 0,
-                            "to": 11489.361702127659
-                        },
-                        "trim": {
-                            "from": 0,
-                            "to": 11489.361702127659
-                        },
-                        "playbackRate": 1,
-                        "details": {
-                            "src": "http://127.0.0.1:8000/media/691c6d686ad325a3e62e7e75/70dff9bd4881450187fca7457dab51ac_upload.mp3",
-                            "volume": 100
-                        },
-                        "metadata": {},
-                        "duration": 30693.875,
-                        "isMain": false
-                    },
-                    "iUNPAwUpJE66gxg": {
-                        "id": "iUNPAwUpJE66gxg",
-                        "name": "audio",
-                        "type": "audio",
-                        "display": {
-                            "from": 11489.361702127659,
-                            "to": 15935.153978749175
-                        },
-                        "trim": {
-                            "from": 0,
-                            "to": 4445.792276621516
-                        },
-                        "playbackRate": 1,
-                        "details": {
-                            "src": "http://127.0.0.1:8000/media/691c6d686ad325a3e62e7e75/110f17a7d62a4350b8da0df07f696160_upload.mp3",
-                            "volume": 100
-                        },
-                        "metadata": {
-                            "isCustomerField": true,
-                            "isLocked": false,
-                            "dataType": "audio",
-                            "fieldPath": "background_music",
-                            "fieldLabel": "Background Music",
-                            "defaultValue": "Background Music"
-                        },
-                        "duration": 61570.594
-                    },
-                    "ritlZWcRmgQF8rQ": {
-                        "id": "ritlZWcRmgQF8rQ",
-                        "type": "image",
-                        "name": "image",
-                        "display": {
-                            "from": 12642.748720059693,
-                            "to": 14216.110525097127
-                        },
-                        "playbackRate": 1,
-                        "details": {
-                            "src": "http://127.0.0.1:8000/media/691c6d686ad325a3e62e7e75/20399e4dbbf349b0a029eab600b33855_upload.jpg",
-                            "width": 7952,
-                            "height": 5304,
-                            "opacity": 100,
-                            "transform": "scale(0.245436, 0.245436)",
-                            "border": "none",
-                            "borderRadius": 0,
-                            "boxShadow": {
-                                "color": "#000000",
-                                "x": 0,
-                                "y": 0,
-                                "blur": 0
-                            },
-                            "top": -2110.47,
-                            "left": -3013.72,
-                            "borderWidth": 0,
-                            "borderColor": "#000000",
-                            "blur": 0,
-                            "brightness": 100,
-                            "flipX": false,
-                            "flipY": false,
-                            "rotate": "0deg",
-                            "visibility": "visible"
-                        },
-                        "metadata": {
-                            "isCustomerField": true,
-                            "isLocked": false,
-                            "dataType": "image",
-                            "fieldPath": "background_image",
-                            "fieldLabel": "Background Image",
-                            "defaultValue": "Background Image"
-                        },
-                        "isMain": false
-                    },
-                    "xXEm8U9u5v0S1vp": {
-                        "id": "xXEm8U9u5v0S1vp",
-                        "type": "image",
-                        "name": "image",
-                        "display": {
-                            "from": 14216.110525097127,
-                            "to": 15993.42663819497
-                        },
-                        "playbackRate": 1,
-                        "details": {
-                            "src": "http://127.0.0.1:8000/media/691c6d686ad325a3e62e7e75/ae6bfd07e71a4366ae7d97e825c20096_upload.jpg",
-                            "width": 4671,
-                            "height": 3109,
-                            "opacity": 100,
-                            "transform": "scale(0.408745, 0.408745)",
-                            "border": "none",
-                            "borderRadius": 0,
-                            "boxShadow": {
-                                "color": "#000000",
-                                "x": 0,
-                                "y": 0,
-                                "blur": 0
-                            },
-                            "top": "-1084.16px",
-                            "left": "-1374.84px",
-                            "borderWidth": 0,
-                            "borderColor": "#000000",
-                            "blur": 0,
-                            "brightness": 100,
-                            "flipX": false,
-                            "flipY": false,
-                            "rotate": "0deg",
-                            "visibility": "visible"
-                        },
-                        "metadata": {
-                            "isCustomerField": true,
-                            "isLocked": false,
-                            "dataType": "image",
-                            "fieldPath": "background_image",
-                            "fieldLabel": "Background Image",
-                            "defaultValue": "Background Image"
-                        },
-                        "isMain": false
-                    },
-                    "BI5_naRSc2hHGX4gDz6VC": {
-                        "id": "BI5_naRSc2hHGX4gDz6VC",
-                        "name": "text",
-                        "type": "text",
-                        "display": {
-                            "from": 0,
-                            "to": 5000
-                        },
-                        "details": {
-                            "text": "Tex 1 test proper workl",
-                            "fontSize": 120,
-                            "width": 1474,
-                            "fontUrl": "https://fonts.gstatic.com/s/roboto/v29/KFOlCnqEu92Fr1MmWUlvAx05IsDqlA.ttf",
-                            "fontFamily": "Roboto-Bold",
-                            "color": "#f5be36",
-                            "wordWrap": "break-word",
-                            "textAlign": "center",
-                            "borderWidth": 0,
-                            "borderColor": "transparent",
-                            "boxShadow": {
-                                "color": "#b12019",
-                                "x": 8,
-                                "y": 8,
-                                "blur": 0
-                            },
-                            "fontWeight": "normal",
-                            "fontStyle": "normal",
-                            "textDecoration": "none",
-                            "lineHeight": "normal",
-                            "letterSpacing": "normal",
-                            "wordSpacing": "normal",
-                            "backgroundColor": "transparent",
-                            "border": "none",
-                            "textShadow": "none",
-                            "opacity": 100,
-                            "wordBreak": "normal",
-                            "WebkitTextStrokeColor": "#ffffff",
-                            "WebkitTextStrokeWidth": "0px",
-                            "top": "915.299px",
-                            "left": "228.751px",
-                            "textTransform": "none",
-                            "transform": "none",
-                            "skewX": 0,
-                            "skewY": 0,
-                            "height": 145,
-                            "borderRadius": 10
-                        },
-                        "metadata": {
-                            "isCustomerField": true,
-                            "isLocked": false,
-                            "dataType": "text",
-                            "fieldPath": "custom_text",
-                            "fieldLabel": "Custom Text",
-                            "defaultValue": "Heading and some body"
-                        },
-                        "isMain": false
-                    },
-                    "G_Q49QYzzPsg8XLwUsD4h": {
-                        "id": "G_Q49QYzzPsg8XLwUsD4h",
-                        "name": "text",
-                        "type": "text",
-                        "display": {
-                            "from": 10981.977925853513,
-                            "to": 15981.977925853513
-                        },
-                        "details": {
-                            "text": "Heading and some body",
-                            "fontSize": 120,
-                            "width": 1496,
-                            "fontUrl": "https://fonts.gstatic.com/s/roboto/v29/KFOlCnqEu92Fr1MmWUlvAx05IsDqlA.ttf",
-                            "fontFamily": "Roboto-Bold",
-                            "color": "#ffffff",
-                            "wordWrap": "break-word",
-                            "textAlign": "center",
-                            "borderWidth": 0,
-                            "borderColor": "#000000",
-                            "boxShadow": {
-                                "color": "#ffffff",
-                                "x": 0,
-                                "y": 0,
-                                "blur": 0
-                            },
-                            "fontWeight": "normal",
-                            "fontStyle": "normal",
-                            "textDecoration": "none",
-                            "lineHeight": "normal",
-                            "letterSpacing": "normal",
-                            "wordSpacing": "normal",
-                            "backgroundColor": "transparent",
-                            "border": "none",
-                            "textShadow": "none",
-                            "opacity": 100,
-                            "wordBreak": "normal",
-                            "WebkitTextStrokeColor": "#ffffff",
-                            "WebkitTextStrokeWidth": "0px",
-                            "top": "123.721px",
-                            "left": "202.12px",
-                            "textTransform": "none",
-                            "transform": "none",
-                            "skewX": 0,
-                            "skewY": 0,
-                            "height": 145
-                        },
-                        "metadata": {
-                            "isCustomerField": true,
-                            "isLocked": false,
-                            "dataType": "text",
-                            "fieldPath": "custom_text",
-                            "fieldLabel": "Custom Text",
-                            "defaultValue": "Heading and some body"
-                        }
-                    },
-                    "X55h4lwQjp1uaSZh": {
-                        "id": "X55h4lwQjp1uaSZh",
-                        "name": "text",
-                        "type": "text",
-                        "display": {
-                            "from": 10923.705266407722,
-                            "to": 15923.705266407722
-                        },
-                        "details": {
-                            "text": "{{customer_company_name}}",
-                            "fontSize": 40,
-                            "width": 600,
-                            "fontUrl": "https://fonts.gstatic.com/s/roboto/v29/KFOlCnqEu92Fr1MmWUlvAx05IsDqlA.ttf",
-                            "fontFamily": "Roboto-Bold",
-                            "color": "#ffffff",
-                            "wordWrap": "break-word",
-                            "textAlign": "left",
-                            "borderWidth": 0,
-                            "borderColor": "#000000",
-                            "boxShadow": {
-                                "color": "#00000000",
-                                "x": 0,
-                                "y": 0,
-                                "blur": 0
-                            },
-                            "fontWeight": "normal",
-                            "fontStyle": "normal",
-                            "textDecoration": "none",
-                            "lineHeight": "normal",
-                            "letterSpacing": "normal",
-                            "wordSpacing": "normal",
-                            "backgroundColor": "transparent",
-                            "border": "none",
-                            "textShadow": "none",
-                            "opacity": 100,
-                            "wordBreak": "normal",
-                            "WebkitTextStrokeColor": "#ffffff",
-                            "WebkitTextStrokeWidth": "0px",
-                            "top": "165.886px",
-                            "left": "665.8px",
-                            "textTransform": "none",
-                            "transform": "none",
-                            "skewX": 0,
-                            "skewY": 0,
-                            "height": 48.8
-                        },
-                        "metadata": {
-                            "isCustomerField": true,
-                            "isLocked": false,
-                            "dataType": "text",
-                            "fieldPath": "customer_company_name",
-                            "fieldLabel": "Customer Company Name",
-                            "defaultValue": "Customer Company Name"
-                        },
-                        "isMain": false
-                    },
-                    "pzbrlECUQ3mrm9ca": {
-                        "id": "pzbrlECUQ3mrm9ca",
-                        "name": "text",
-                        "type": "text",
-                        "display": {
-                            "from": 0,
-                            "to": 5000
-                        },
-                        "details": {
-                            "text": "{{full_name}}",
-                            "fontSize": 40,
-                            "width": 600,
-                            "fontUrl": "https://fonts.gstatic.com/s/roboto/v29/KFOlCnqEu92Fr1MmWUlvAx05IsDqlA.ttf",
-                            "fontFamily": "Roboto-Bold",
-                            "color": "#ffffff",
-                            "wordWrap": "break-word",
-                            "textAlign": "left",
-                            "borderWidth": 0,
-                            "borderColor": "#000000",
-                            "boxShadow": {
-                                "color": "#00000000",
-                                "x": 0,
-                                "y": 0,
-                                "blur": 0
-                            },
-                            "fontWeight": "normal",
-                            "fontStyle": "normal",
-                            "textDecoration": "none",
-                            "lineHeight": "normal",
-                            "letterSpacing": "normal",
-                            "wordSpacing": "normal",
-                            "backgroundColor": "transparent",
-                            "border": "none",
-                            "textShadow": "none",
-                            "opacity": 100,
-                            "wordBreak": "normal",
-                            "WebkitTextStrokeColor": "#ffffff",
-                            "WebkitTextStrokeWidth": "0px",
-                            "top": "63.5px",
-                            "left": "1320px",
-                            "textTransform": "none",
-                            "transform": "none",
-                            "skewX": 0,
-                            "skewY": 0,
-                            "height": 48.8
-                        },
-                        "metadata": {
-                            "isCustomerField": true,
-                            "isLocked": false,
-                            "dataType": "text",
-                            "fieldPath": "full_name",
-                            "fieldLabel": "Full Name",
-                            "defaultValue": "Full Name"
-                        },
-                        "isMain": false
-                    },
-                    "AvIu0l1xrho0nl5U": {
-                        "id": "AvIu0l1xrho0nl5U",
-                        "name": "text",
-                        "type": "text",
-                        "display": {
-                            "from": 5000,
-                            "to": 10000
-                        },
-                        "details": {
-                            "text": "{{city}}",
-                            "fontSize": 40,
-                            "width": 600,
-                            "fontUrl": "https://fonts.gstatic.com/s/roboto/v29/KFOlCnqEu92Fr1MmWUlvAx05IsDqlA.ttf",
-                            "fontFamily": "Roboto-Bold",
-                            "color": "#ffffff",
-                            "wordWrap": "break-word",
-                            "textAlign": "left",
-                            "borderWidth": 0,
-                            "borderColor": "#000000",
-                            "boxShadow": {
-                                "color": "#00000000",
-                                "x": 0,
-                                "y": 0,
-                                "blur": 0
-                            },
-                            "fontWeight": "normal",
-                            "fontStyle": "normal",
-                            "textDecoration": "none",
-                            "lineHeight": "normal",
-                            "letterSpacing": "normal",
-                            "wordSpacing": "normal",
-                            "backgroundColor": "transparent",
-                            "border": "none",
-                            "textShadow": "none",
-                            "opacity": 100,
-                            "wordBreak": "normal",
-                            "WebkitTextStrokeColor": "#ffffff",
-                            "WebkitTextStrokeWidth": "0px",
-                            "top": "63.5px",
-                            "left": "937.714px",
-                            "textTransform": "none",
-                            "transform": "none",
-                            "skewX": 0,
-                            "skewY": 0,
-                            "height": 48.8
-                        },
-                        "metadata": {
-                            "isCustomerField": true,
-                            "isLocked": false,
-                            "dataType": "text",
-                            "fieldPath": "city",
-                            "fieldLabel": "City",
-                            "defaultValue": "City"
-                        },
-                        "isMain": false
-                    },
-                    "oMNloVYhGGhazcQY": {
-                        "id": "oMNloVYhGGhazcQY",
-                        "name": "text",
-                        "type": "text",
-                        "display": {
-                            "from": 0,
-                            "to": 15935.153978749177
-                        },
-                        "details": {
-                            "text": "{{phone_number}}",
-                            "fontSize": 40,
-                            "width": 600,
-                            "fontUrl": "https://fonts.gstatic.com/s/roboto/v29/KFOlCnqEu92Fr1MmWUlvAx05IsDqlA.ttf",
-                            "fontFamily": "Roboto-Bold",
-                            "color": "#ffffff",
-                            "wordWrap": "break-word",
-                            "textAlign": "left",
-                            "borderWidth": 0,
-                            "borderColor": "#000000",
-                            "boxShadow": {
-                                "color": "#00000000",
-                                "x": 0,
-                                "y": 0,
-                                "blur": 0
-                            },
-                            "fontWeight": "normal",
-                            "fontStyle": "normal",
-                            "textDecoration": "none",
-                            "lineHeight": "normal",
-                            "letterSpacing": "normal",
-                            "wordSpacing": "normal",
-                            "backgroundColor": "transparent",
-                            "border": "none",
-                            "textShadow": "none",
-                            "opacity": 100,
-                            "wordBreak": "normal",
-                            "WebkitTextStrokeColor": "#ffffff",
-                            "WebkitTextStrokeWidth": "0px",
-                            "top": "63.5px",
-                            "left": "392.571px",
-                            "textTransform": "none",
-                            "transform": "none",
-                            "skewX": 0,
-                            "skewY": 0,
-                            "height": 48.8
-                        },
-                        "metadata": {
-                            "isCustomerField": true,
-                            "isLocked": false,
-                            "dataType": "text",
-                            "fieldPath": "phone_number",
-                            "fieldLabel": "Phone Number",
-                            "defaultValue": "Phone Number"
-                        },
-                        "isMain": false
-                    },
-                    "qXm7PZxLV4Bwvfyy": {
-                        "id": "qXm7PZxLV4Bwvfyy",
-                        "name": "text",
-                        "type": "text",
-                        "display": {
-                            "from": 0,
-                            "to": 15935.153978749177
-                        },
-                        "details": {
-                            "text": "{{address}}",
-                            "fontSize": 44.0818,
-                            "width": 300,
-                            "fontUrl": "https://fonts.gstatic.com/s/roboto/v29/KFOlCnqEu92Fr1MmWUlvAx05IsDqlA.ttf",
-                            "fontFamily": "Roboto-Bold",
-                            "color": "#ffffff",
-                            "wordWrap": "break-word",
-                            "textAlign": "left",
-                            "borderWidth": 0,
-                            "borderColor": "#000000",
-                            "boxShadow": {
-                                "color": "#00000000",
-                                "x": 0,
-                                "y": 0,
-                                "blur": 0
-                            },
-                            "fontWeight": "normal",
-                            "fontStyle": "normal",
-                            "textDecoration": "none",
-                            "lineHeight": "normal",
-                            "letterSpacing": "normal",
-                            "wordSpacing": "normal",
-                            "backgroundColor": "transparent",
-                            "border": "none",
-                            "textShadow": "none",
-                            "opacity": 100,
-                            "wordBreak": "normal",
-                            "WebkitTextStrokeColor": "#ffffff",
-                            "WebkitTextStrokeWidth": "0px",
-                            "top": "57.72px",
-                            "left": "42.8574px",
-                            "textTransform": "none",
-                            "transform": "none",
-                            "skewX": 0,
-                            "skewY": 0,
-                            "height": 53
-                        },
-                        "metadata": {
-                            "isCustomerField": true,
-                            "isLocked": false,
-                            "dataType": "text",
-                            "fieldPath": "address",
-                            "fieldLabel": "Address",
-                            "defaultValue": "Address"
-                        },
-                        "isMain": false
-                    }
-                },
-                "trackItemIds": [
-                    "OiQ68BzTd89UHv",
-                    "CTFTM1lThrdSj78M",
-                    "K5rPTuTrfOW9z7p",
-                    "iUNPAwUpJE66gxg",
-                    "Afi8vLjYdJuhmA",
-                    "xXEm8U9u5v0S1vp",
-                    "ritlZWcRmgQF8rQ",
-                    "BI5_naRSc2hHGX4gDz6VC",
-                    "G_Q49QYzzPsg8XLwUsD4h",
-                    "X55h4lwQjp1uaSZh",
-                    "pzbrlECUQ3mrm9ca",
-                    "AvIu0l1xrho0nl5U",
-                    "oMNloVYhGGhazcQY",
-                    "qXm7PZxLV4Bwvfyy"
-                ],
-                "transitionsMap": {
-                    "ritlZWcRmgQF8rQ-xXEm8U9u5v0S1vp": {
-                        "id": "ritlZWcRmgQF8rQ-xXEm8U9u5v0S1vp",
-                        "duration": 1500,
-                        "fromId": "ritlZWcRmgQF8rQ",
-                        "toId": "xXEm8U9u5v0S1vp",
-                        "kind": "none",
-                        "trackId": "_QHscIie3yJx4Nc9LokF0",
-                        "type": "transition"
-                    }
-                },
-                "transitionIds": [
-                    "ritlZWcRmgQF8rQ-xXEm8U9u5v0S1vp"
-                ],
-                "backgroundColor": "transparent"
+        "tracks": [
+          {
+            "id": "UofN4jCwdXlsQAX_LHr2t",
+            "accepts": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "composition",
+              "caption",
+              "template",
+              "customTrack",
+              "customTrack2",
+              "illustration",
+              "custom",
+              "main",
+              "shape",
+              "linealAudioBars",
+              "radialAudioBars",
+              "progressFrame",
+              "progressBar",
+              "rect",
+              "progressSquare"
+            ],
+            "type": "text",
+            "items": ["J8PtN5ravO6zADtTRvzV-"],
+            "magnetic": false,
+            "static": false,
+            "muted": false
+          },
+          {
+            "id": "17hsbFpCdcd6w2GGMtxLu",
+            "accepts": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "composition",
+              "caption",
+              "template",
+              "customTrack",
+              "customTrack2",
+              "illustration",
+              "custom",
+              "main",
+              "shape",
+              "linealAudioBars",
+              "radialAudioBars",
+              "progressFrame",
+              "progressBar",
+              "rect",
+              "progressSquare"
+            ],
+            "type": "text",
+            "items": ["Y7P5Fvr40_lYNMxnYz4B0"],
+            "magnetic": false,
+            "static": false,
+            "muted": false
+          },
+          {
+            "id": "4HgHOwapdPhFjCHSNdE_t",
+            "accepts": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "composition",
+              "caption",
+              "template",
+              "customTrack",
+              "customTrack2",
+              "illustration",
+              "custom",
+              "main",
+              "shape",
+              "linealAudioBars",
+              "radialAudioBars",
+              "progressFrame",
+              "progressBar",
+              "rect",
+              "progressSquare"
+            ],
+            "type": "audio",
+            "items": ["btBKARF2eqWQfyFZ"],
+            "magnetic": false,
+            "static": false,
+            "muted": false
+          },
+          {
+            "id": "86BMmbWfUoa5CRVIKulma",
+            "accepts": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "composition",
+              "caption",
+              "template",
+              "customTrack",
+              "customTrack2",
+              "illustration",
+              "custom",
+              "main",
+              "shape",
+              "linealAudioBars",
+              "radialAudioBars",
+              "progressFrame",
+              "progressBar",
+              "rect",
+              "progressSquare"
+            ],
+            "type": "video",
+            "items": [
+              "PYguwrqVFc4VsAPn",
+              "L7Qzn0gBqiwV1LTE",
+              "OsJfNBDmgi2DZ19c",
+              "Dmdl840esqxUthB0",
+              "Az9RWUqjLHDtmLY"
+            ],
+            "magnetic": false,
+            "static": false,
+            "muted": false
+          }
+        ],
+        "trackItemsMap": {
+          "Dmdl840esqxUthB0": {
+            "id": "Dmdl840esqxUthB0",
+            "details": {
+              "width": 2160,
+              "height": 4096,
+              "opacity": 100,
+              "src": "./media/695de5db61e32ffac0d26487/be648ac6ebd44d3db6cf989a320d7953_upload.mp4",
+              "volume": 100,
+              "borderRadius": 0,
+              "borderWidth": 0,
+              "borderColor": "#000000",
+              "boxShadow": {
+                "color": "#000000",
+                "x": 0,
+                "y": 0,
+                "blur": 0
+              },
+              "top": "-1088px",
+              "left": "-540px",
+              "transform": "scale(0.46875)",
+              "blur": 0,
+              "brightness": 100,
+              "flipX": false,
+              "flipY": false,
+              "rotate": "0deg",
+              "visibility": "visible"
             },
-            "options": {
-                "fps": 30,
-                "format": "mp4"
-            }
+            "metadata": {
+              "previewUrl": "https://cdn.designcombo.dev/caption_previews/static_preset1.webp"
+            },
+            "trim": {
+              "from": 0,
+              "to": 7360
+            },
+            "type": "video",
+            "name": "video",
+            "playbackRate": 1,
+            "display": {
+              "from": 9281.91489361702,
+              "to": 16641.91489361702
+            },
+            "duration": 7360,
+            "isMain": false
+          },
+          "L7Qzn0gBqiwV1LTE": {
+            "id": "L7Qzn0gBqiwV1LTE",
+            "details": {
+              "width": 2160,
+              "height": 3840,
+              "opacity": 100,
+              "src": "./media/695de5db61e32ffac0d26487/a303f2c30ede489882136a7f065d9400_upload.mp4",
+              "volume": 100,
+              "borderRadius": 0,
+              "borderWidth": 0,
+              "borderColor": "#000000",
+              "boxShadow": {
+                "color": "#000000",
+                "x": 0,
+                "y": 0,
+                "blur": 0
+              },
+              "top": "-960px",
+              "left": "-540px",
+              "transform": "scale(0.5)",
+              "blur": 0,
+              "brightness": 100,
+              "flipX": false,
+              "flipY": false,
+              "rotate": "0deg",
+              "visibility": "visible"
+            },
+            "metadata": {
+              "previewUrl": "https://cdn.designcombo.dev/caption_previews/static_preset1.webp"
+            },
+            "trim": {
+              "from": 0,
+              "to": 3643.6170212766006
+            },
+            "type": "video",
+            "name": "video",
+            "playbackRate": 1,
+            "display": {
+              "from": 2287.234042553193,
+              "to": 5930.8510638297885
+            },
+            "duration": 7840,
+            "isMain": false
+          },
+          "PYguwrqVFc4VsAPn": {
+            "id": "PYguwrqVFc4VsAPn",
+            "type": "image",
+            "name": "image",
+            "display": {
+              "from": 0,
+              "to": 2287.234042553193
+            },
+            "playbackRate": 1,
+            "details": {
+              "src": "./media/695de5db61e32ffac0d26487/7dd9c5981b864c59aeb3c6a5aa1d658a_upload.jpg",
+              "width": 4000,
+              "height": 6000,
+              "opacity": 100,
+              "transform": "scale(0.334695, 0.334695)",
+              "border": "none",
+              "borderRadius": 0,
+              "boxShadow": {
+                "color": "#000000",
+                "x": 0,
+                "y": 0,
+                "blur": 0
+              },
+              "top": -2042.54,
+              "left": -1458.3,
+              "borderWidth": 0,
+              "borderColor": "#000000",
+              "blur": 0,
+              "brightness": 100,
+              "flipX": false,
+              "flipY": false,
+              "rotate": "0deg",
+              "visibility": "visible"
+            },
+            "metadata": {
+              "isCustomerField": true,
+              "isLocked": false,
+              "dataType": "image",
+              "fieldPath": "background_image",
+              "fieldLabel": "Background Image",
+              "defaultValue": "Background Image"
+            },
+            "isMain": false
+          },
+          "Az9RWUqjLHDtmLY": {
+            "id": "Az9RWUqjLHDtmLY",
+            "type": "image",
+            "name": "image",
+            "display": {
+              "from": 16641.91489361702,
+              "to": 21641.91489361702
+            },
+            "playbackRate": 1,
+            "details": {
+              "src": "./media/695de5db61e32ffac0d26487/05bf34680b2645ea938cff350f6aadbe_upload.jpg",
+              "width": 4882,
+              "height": 6102,
+              "opacity": 100,
+              "transform": "scale(0.22122081114297418)",
+              "border": "none",
+              "borderRadius": 0,
+              "boxShadow": {
+                "color": "#000000",
+                "x": 0,
+                "y": 0,
+                "blur": 0
+              },
+              "top": "-2376.05px",
+              "left": "-1901px",
+              "borderWidth": 0,
+              "borderColor": "#000000",
+              "blur": 0,
+              "brightness": 100,
+              "flipX": false,
+              "flipY": false,
+              "rotate": "0deg",
+              "visibility": "visible"
+            },
+            "metadata": {
+              "isCustomerField": true,
+              "isLocked": false,
+              "dataType": "image",
+              "fieldPath": "background_image",
+              "fieldLabel": "Background Image",
+              "defaultValue": "Background Image"
+            },
+            "isMain": false
+          },
+          "OsJfNBDmgi2DZ19c": {
+            "id": "OsJfNBDmgi2DZ19c",
+            "type": "image",
+            "name": "image",
+            "display": {
+              "from": 5930.8510638297885,
+              "to": 9281.914893617022
+            },
+            "playbackRate": 1,
+            "details": {
+              "src": "./media/695de5db61e32ffac0d26487/a8804a231ec64112aa9faf4c2add0e54_upload.jpg",
+              "width": 3986,
+              "height": 5979,
+              "opacity": 100,
+              "transform": "scale(0.33347, 0.33347)",
+              "border": "none",
+              "borderRadius": 0,
+              "boxShadow": {
+                "color": "#000000",
+                "x": 0,
+                "y": 0,
+                "blur": 0
+              },
+              "top": -2016.74,
+              "left": -1456.15,
+              "borderWidth": 0,
+              "borderColor": "#000000",
+              "blur": 0,
+              "brightness": 100,
+              "flipX": false,
+              "flipY": false,
+              "rotate": "0deg",
+              "visibility": "visible"
+            },
+            "metadata": {
+              "isCustomerField": true,
+              "isLocked": false,
+              "dataType": "image",
+              "fieldPath": "background_image",
+              "fieldLabel": "Background Image",
+              "defaultValue": "Background Image"
+            },
+            "isMain": false
+          },
+          "btBKARF2eqWQfyFZ": {
+            "id": "btBKARF2eqWQfyFZ",
+            "name": "audio",
+            "type": "audio",
+            "display": {
+              "from": 0,
+              "to": 21641.91489361703
+            },
+            "trim": {
+              "from": 8247.066489361701,
+              "to": 29888.981382978716
+            },
+            "playbackRate": 1,
+            "details": {
+              "src": "./media/695de5db61e32ffac0d26487/66bf67ba21af4d26a358d0008c728290_upload.mp3",
+              "volume": 100
+            },
+            "metadata": {
+              "isCustomerField": true,
+              "isLocked": false,
+              "dataType": "audio",
+              "fieldPath": "background_music",
+              "fieldLabel": "Background Music",
+              "defaultValue": "Background Music"
+            },
+            "duration": 30693.875,
+            "isMain": false
+          },
+          "Y7P5Fvr40_lYNMxnYz4B0": {
+            "id": "Y7P5Fvr40_lYNMxnYz4B0",
+            "name": "text",
+            "type": "text",
+            "display": {
+              "from": 16641.91489361702,
+              "to": 21641.91489361702
+            },
+            "details": {
+              "text": "Heading and some body",
+              "fontSize": 120,
+              "width": 1024,
+              "fontUrl": "https://fonts.gstatic.com/s/bangers/v13/FeVQS0BTqb0h60ACL5la2bxii28.ttf",
+              "fontFamily": "Bangers-Regular",
+              "color": "#000",
+              "wordWrap": "break-word",
+              "textAlign": "center",
+              "borderWidth": 0,
+              "borderColor": "transparent",
+              "boxShadow": {
+                "color": "transparent",
+                "x": 0,
+                "y": 0,
+                "blur": 0
+              },
+              "fontWeight": "normal",
+              "fontStyle": "normal",
+              "textDecoration": "none",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "wordSpacing": "normal",
+              "backgroundColor": "#ffde00",
+              "border": "none",
+              "textShadow": "none",
+              "opacity": 100,
+              "wordBreak": "normal",
+              "WebkitTextStrokeColor": "#ffffff",
+              "WebkitTextStrokeWidth": "0px",
+              "top": "1438.46px",
+              "left": "31.3043px",
+              "textTransform": "none",
+              "transform": "none",
+              "skewX": 0,
+              "skewY": 0,
+              "height": 127,
+              "borderRadius": 20
+            },
+            "metadata": {
+              "isCustomerField": true,
+              "isLocked": false,
+              "dataType": "text",
+              "fieldPath": "custom_text",
+              "fieldLabel": "Custom Text",
+              "defaultValue": "Heading and some body"
+            },
+            "isMain": false
+          },
+          "J8PtN5ravO6zADtTRvzV-": {
+            "id": "J8PtN5ravO6zADtTRvzV-",
+            "name": "text",
+            "type": "text",
+            "display": {
+              "from": 0,
+              "to": 21641.914893617024
+            },
+            "details": {
+              "text": "Heading and some body",
+              "fontSize": 120,
+              "width": 600,
+              "fontUrl": "https://fonts.gstatic.com/s/roboto/v29/KFOlCnqEu92Fr1MmWUlvAx05IsDqlA.ttf",
+              "fontFamily": "Roboto-Bold",
+              "color": "#fff",
+              "wordWrap": "break-word",
+              "textAlign": "center",
+              "borderWidth": 12,
+              "borderColor": "#000",
+              "boxShadow": {
+                "color": "#000",
+                "x": -12,
+                "y": 12,
+                "blur": 0
+              },
+              "fontWeight": "normal",
+              "fontStyle": "normal",
+              "textDecoration": "none",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "wordSpacing": "normal",
+              "backgroundColor": "transparent",
+              "border": "none",
+              "textShadow": "none",
+              "opacity": 100,
+              "wordBreak": "normal",
+              "WebkitTextStrokeColor": "#ffffff",
+              "WebkitTextStrokeWidth": "0px",
+              "top": "241.7px",
+              "left": "212.174px",
+              "textTransform": "none",
+              "transform": "none",
+              "skewX": 0,
+              "skewY": 0,
+              "height": 434.4,
+              "borderRadius": 10
+            },
+            "metadata": {
+              "isCustomerField": true,
+              "isLocked": false,
+              "dataType": "text",
+              "fieldPath": "custom_text",
+              "fieldLabel": "Custom Text",
+              "defaultValue": "Heading and some body"
+            },
+            "isMain": false
+          }
         },
-        "status": "active",
-        "created_at": "2026-01-03T11:38:28.033000",
-        "updated_at": "2026-01-03T11:38:28.033000",
-        "id": "6958ffb44269647be02c0219"
-    }
+        "trackItemIds": [
+          "OsJfNBDmgi2DZ19c",
+          "Az9RWUqjLHDtmLY",
+          "PYguwrqVFc4VsAPn",
+          "L7Qzn0gBqiwV1LTE",
+          "Dmdl840esqxUthB0",
+          "btBKARF2eqWQfyFZ",
+          "Y7P5Fvr40_lYNMxnYz4B0",
+          "J8PtN5ravO6zADtTRvzV-"
+        ],
+        "transitionsMap": {
+          "PYguwrqVFc4VsAPn-L7Qzn0gBqiwV1LTE": {
+            "id": "PYguwrqVFc4VsAPn-L7Qzn0gBqiwV1LTE",
+            "duration": 1500,
+            "fromId": "PYguwrqVFc4VsAPn",
+            "toId": "L7Qzn0gBqiwV1LTE",
+            "kind": "none",
+            "trackId": "86BMmbWfUoa5CRVIKulma",
+            "type": "transition"
+          },
+          "L7Qzn0gBqiwV1LTE-OsJfNBDmgi2DZ19c": {
+            "id": "L7Qzn0gBqiwV1LTE-OsJfNBDmgi2DZ19c",
+            "duration": 1500,
+            "fromId": "L7Qzn0gBqiwV1LTE",
+            "toId": "OsJfNBDmgi2DZ19c",
+            "kind": "none",
+            "trackId": "86BMmbWfUoa5CRVIKulma",
+            "type": "transition"
+          },
+          "OsJfNBDmgi2DZ19c-Dmdl840esqxUthB0": {
+            "id": "OsJfNBDmgi2DZ19c-Dmdl840esqxUthB0",
+            "duration": 1500,
+            "fromId": "OsJfNBDmgi2DZ19c",
+            "toId": "Dmdl840esqxUthB0",
+            "kind": "none",
+            "trackId": "86BMmbWfUoa5CRVIKulma",
+            "type": "transition"
+          },
+          "Dmdl840esqxUthB0-Az9RWUqjLHDtmLY": {
+            "id": "Dmdl840esqxUthB0-Az9RWUqjLHDtmLY",
+            "duration": 1500,
+            "fromId": "Dmdl840esqxUthB0",
+            "toId": "Az9RWUqjLHDtmLY",
+            "kind": "none",
+            "trackId": "86BMmbWfUoa5CRVIKulma",
+            "type": "transition"
+          }
+        },
+        "transitionIds": [
+          "PYguwrqVFc4VsAPn-L7Qzn0gBqiwV1LTE",
+          "L7Qzn0gBqiwV1LTE-OsJfNBDmgi2DZ19c",
+          "OsJfNBDmgi2DZ19c-Dmdl840esqxUthB0",
+          "Dmdl840esqxUthB0-Az9RWUqjLHDtmLY"
+        ],
+        "backgroundColor": "#000000"
+      },
+      "options": {
+        "fps": 30,
+        "format": "mp4"
+      }
+    },
+    "type": "video",
+    "status": "active",
+    "created_at": "2026-01-29T07:44:19.794000",
+    "updated_at": "2026-01-29T07:44:19.794000",
+    "id": "697b0fd336082cb80e75e390"
+  }
 ]
