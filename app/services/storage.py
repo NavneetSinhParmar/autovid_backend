@@ -20,7 +20,8 @@ def save_file_local(file_obj: bytes, company_id: str, filename: str) -> str:
     # 🔥 Return RELATIVE path WITHOUT "media/" prefix
     # url.py will add the /media/ prefix when building full URLs
     # This prevents duplicate paths like /media/./media/...
-    return f"{company_id}/{unique_name}"
+    # return f"{company_id}/{unique_name}"
+    return f"{full_path}"
 
 
 async def save_upload_file(file, company_id: str) -> Tuple[str, int]:
