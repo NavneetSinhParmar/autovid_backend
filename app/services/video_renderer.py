@@ -649,7 +649,7 @@ def normalize_media_src(src: str) -> str:
 def write_text_temp(text: str) -> str:
     ensure_dir(MEDIA_ROOT)
     name = f"text_{uuid.uuid4().hex}.txt"
-    path = os.path.join(MEDIA_ROOT, name)
+    path = os.path.abspath(os.path.join(MEDIA_ROOT, name))
     with open(path, "w", encoding="utf-8") as f:
         f.write(text or "")
     return path
@@ -701,25 +701,55 @@ def render_preview(template_json, customer, output_path):
     filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]")
     last_label = "[base]"
 
-    # 2. SEPARATE INPUTS (Videos, Images, Audio)
-    for track in tracks:
-        itype = track.get("type")
-        for item_id in track.get("items", []):
+    # 2. SEPARATE INPUTS (Videos, Images, Audio) with stable order
+    track_item_ids = design.get("trackItemIds", [])
+    ordered_visual_ids = [tid for tid in track_item_ids if track_items_map.get(tid, {}).get("type") in ["video", "image"]]
+
+    if ordered_visual_ids:
+        for item_id in ordered_visual_ids:
             item = track_items_map.get(item_id, {})
             details = item.get("details", {})
             src = details.get("src", "")
-            if not src: continue
+            if not src:
+                continue
+            abs_src = normalize_media_src(src)
+            if not abs_src.startswith("http"):
+                ensure_file_exists(abs_src)
+            visual_inputs.append({"src": abs_src, "item": item, "media_type": item.get("type")})
+    else:
+        for track in tracks:
+            itype = track.get("type")
+            for item_id in track.get("items", []):
+                item = track_items_map.get(item_id, {})
+                details = item.get("details", {})
+                src = details.get("src", "")
+                if not src:
+                    continue
+                if itype in ["video", "image"] or item.get("type") in ["video", "image"]:
+                    abs_src = normalize_media_src(src)
+                    if not abs_src.startswith("http"):
+                        ensure_file_exists(abs_src)
+                    media_type = item.get("type") or itype
+                    visual_inputs.append({"src": abs_src, "item": item, "media_type": media_type})
+                elif itype == "audio":
+                    abs_src = normalize_media_src(src)
+                    if not abs_src.startswith("http"):
+                        ensure_file_exists(abs_src)
+                    audio_inputs.append({"src": abs_src, "item": item})
 
-            if itype in ["video", "image"] or item.get("type") in ["video", "image"]:
-                abs_src = normalize_media_src(src)
-                if not abs_src.startswith("http"):
-                    ensure_file_exists(abs_src)
-                visual_inputs.append({"src": abs_src, "item": item})
-            elif itype == "audio":
-                abs_src = normalize_media_src(src)
-                if not abs_src.startswith("http"):
-                    ensure_file_exists(abs_src)
-                audio_inputs.append({"src": abs_src, "item": item})
+    if tracks:
+        for track in tracks:
+            if track.get("type") == "audio":
+                for item_id in track.get("items", []):
+                    item = track_items_map.get(item_id, {})
+                    details = item.get("details", {})
+                    src = details.get("src", "")
+                    if not src:
+                        continue
+                    abs_src = normalize_media_src(src)
+                    if not abs_src.startswith("http"):
+                        ensure_file_exists(abs_src)
+                    audio_inputs.append({"src": abs_src, "item": item})
 
     # 3. BUILD VISUAL FILTERS (Videos & Images)
     for idx, data in enumerate(visual_inputs):
@@ -733,8 +763,8 @@ def render_preview(template_json, customer, output_path):
         # Scaling and Positioning (center-origin scaling like editor)
         orig_w = safe_float(details.get("width", canvas_w))
         orig_h = safe_float(details.get("height", canvas_h))
-        tw = int(orig_w * scale_val)
-        th = int(orig_h * scale_val)
+        tw = to_even(orig_w * scale_val)
+        th = to_even(orig_h * scale_val)
         left = safe_float(details.get("left", 0))
         top = safe_float(details.get("top", 0))
         left = left + (orig_w - tw) / 2
@@ -763,23 +793,40 @@ def render_preview(template_json, customer, output_path):
                     canvas_h=canvas_h,
                 )
 
-                print("after add to text func",last_label, txt_idx)
-
     # 5. AUDIO MIXING
     audio_mix_filter = ""
-    if audio_inputs:
+    audio_sources = []
+    for i, v in enumerate(visual_inputs):
+        if (v.get("media_type") or "").lower() == "video":
+            display = v["item"].get("display", {})
+            a_start = int(display.get("from", 0))
+            vol = safe_float(v["item"].get("details", {}).get("volume", 100)) / 100.0
+            audio_sources.append({"index": i, "start_ms": a_start, "volume": vol})
+    for i, a in enumerate(audio_inputs):
+        idx = len(visual_inputs) + i
+        a_start = int(a["item"].get("display", {}).get("from", 0))
+        vol = safe_float(a["item"].get("details", {}).get("volume", 100)) / 100.0
+        audio_sources.append({"index": idx, "start_ms": a_start, "volume": vol})
+
+    if audio_sources:
         a_labels = ""
-        for i in range(len(audio_inputs)):
-            idx = len(visual_inputs) + i
-            a_start = int(audio_inputs[i]["item"].get("display", {}).get("from", 0))
-            a_labels += f"[{idx}:a]adelay={a_start}|{a_start}[aud{i}];"
-        
-        audio_mix_filter = f"{a_labels}" + "".join([f"[aud{i}]" for i in range(len(audio_inputs))]) + f"amix=inputs={len(audio_inputs)}[outa]"
+        for i, src in enumerate(audio_sources):
+            a_start = max(0, int(src["start_ms"]))
+            volume = src["volume"]
+            vol_filter = f",volume={volume:.3f}" if volume != 1.0 else ""
+            a_labels += f"[{src['index']}:a]adelay={a_start}|{a_start}{vol_filter},aresample=async=1:first_pts=0[aud{i}];"
+        audio_mix_filter = (
+            f"{a_labels}" + "".join([f"[aud{i}]" for i in range(len(audio_sources))]) +
+            f"amix=inputs={len(audio_sources)}:normalize=0[outa]"
+        )
 
     # 6. EXECUTION
     cmd = ["ffmpeg", "-y"]
     for v in visual_inputs:
-        cmd += ["-loop", "1", "-t", str(duration), "-i", v["src"]] if v["src"].lower().endswith(('.jpg', '.png')) else ["-i", v["src"]]
+        if (v.get("media_type") or "").lower() == "image":
+            cmd += ["-loop", "1", "-t", str(duration), "-i", v["src"]]
+        else:
+            cmd += ["-i", v["src"]]
     for a in audio_inputs:
         cmd += ["-i", a["src"]]
 
@@ -790,7 +837,10 @@ def render_preview(template_json, customer, output_path):
     else:
         cmd += ["-filter_complex", full_filter, "-map", last_label]
 
-    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps), "-c:a", "aac", "-t", str(duration), output_path]
+    if audio_mix_filter:
+        cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps), "-c:a", "aac", "-t", str(duration), output_path]
+    else:
+        cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps), "-an", "-t", str(duration), output_path]
     subprocess.run(cmd, check=True)
     
     
