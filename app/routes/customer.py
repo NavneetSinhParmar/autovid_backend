@@ -132,7 +132,7 @@ async def create_customer_handler(
     # ----------------------------------
     elif content_type.startswith("multipart/form-data"):
         form = await request.form()
-
+        print("Form data:", form)
         # Convert form-data → dict (NO bytes issue)
         data = dict(form)
 
@@ -144,7 +144,7 @@ async def create_customer_handler(
             from app.services.storage import save_upload_file
             path, _ = await save_upload_file(logo_file, data["username"])
             data["logo_url"] = path
-
+            print("Logo saved at:", path)
         return await create_single_customer(data, user)
 
     else:
