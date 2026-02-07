@@ -7,6 +7,7 @@ from app.db.connection import db
 from app.utils.auth import require_roles, hash_password
 from app.models.customer_model import CustomerCreate, CustomerOut
 from fastapi import Request, UploadFile, File, Form
+from app.services.storage import save_customer_file
 
 router = APIRouter(prefix="/customer", tags=["Customer Management"])
 print("Customer router loaded")
@@ -141,8 +142,8 @@ async def create_customer_handler(
 
         # Save logo if provided
         if logo_file:
-            from app.services.storage import save_upload_file
-            path, _ = await save_upload_file(logo_file, data["username"])
+            
+            path, _ = await save_customer_file(logo_file, data["username"])
             data["logo_url"] = path
             print("Logo saved at:", path)
         return await create_single_customer(data, user)

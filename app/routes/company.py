@@ -3,7 +3,7 @@ from datetime import datetime
 from bson import ObjectId
 from app.db.connection import db
 from app.utils.auth import require_roles, hash_password
-from app.services.storage import save_upload_file
+from app.services.storage import save_company_file
 from typing import Optional
 from app.services.url import build_media_url
 from fastapi import Request
@@ -45,7 +45,7 @@ async def create_company(
     # ---- STEP 3: Handle LOGO upload (optional) ----
     logo_url = None
     if logo_file:
-        local_path, size = await save_upload_file(logo_file, user_id)
+        local_path, size = await save_company_file(logo_file, user_id)
 
         logo_url = local_path      
                      # local disk path
@@ -162,7 +162,7 @@ async def update_company(
 
     # ---- STEP 3: Handle logo upload ----
     if logo_file:
-        local_path, size = await save_upload_file(logo_file, company["user_id"])
+        local_path, size = await save_company_file(logo_file, company["user_id"])
         update_data["logo_url"] = local_path
 
     if not update_data:
