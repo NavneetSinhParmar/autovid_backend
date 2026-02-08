@@ -7,7 +7,7 @@ from bson import ObjectId
 import json
 from app.db.connection import db
 from app.utils.auth import require_roles
-from app.services.video_renderer import render_preview
+from app.services.video_renderer import render_preview,render_image_preview
 import uuid
 import os 
 router = APIRouter(prefix="/templates", tags=["Templates"])
@@ -230,18 +230,39 @@ async def preview_template_customer(template_id: str, customer_id: str):
     if not customer:
         raise HTTPException(status_code=404, detail="Customer does not exist")
 
-    customer = normalize_customer(customer)  # ✅ ADD THIS
+    customer = normalize_customer(customer)
 
     media_dir = os.path.abspath("media")
     os.makedirs(media_dir, exist_ok=True)
 
+    template_type = template.get("type", "video")
+    print("Template type is",template_type)
+    # 🔀 decide output based on type
+    if template_type == "image":
+        preview_filename = f"{template_id}_{customer_id}_preview.png"
+        preview_path = os.path.join(media_dir, preview_filename)
+
+        await run_in_threadpool(
+            render_image_preview,              # 👈 NEW FUNCTION
+            template["template_json"],
+            customer,
+            preview_path
+        )
+
+        return FileResponse(
+            preview_path,
+            media_type="image/png",
+            filename=preview_filename
+        )
+
+    # 🎥 default = video
     preview_filename = f"{template_id}_{customer_id}_preview.mp4"
     preview_path = os.path.join(media_dir, preview_filename)
 
     await run_in_threadpool(
-        render_preview,
-        template["template_json"],   # ✅ ONLY template_json
-        customer,                    # ✅ normalized customer
+        render_preview,                        # 👈 EXISTING FUNCTION
+        template["template_json"],
+        customer,
         preview_path
     )
 
@@ -250,7 +271,6 @@ async def preview_template_customer(template_id: str, customer_id: str):
         media_type="video/mp4",
         filename=preview_filename
     )
-
 
 @router.get("/{template_id}/download/{customer_id}")
 async def download_video(template_id: str, customer_id: str):
