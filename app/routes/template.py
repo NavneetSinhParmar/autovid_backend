@@ -225,15 +225,9 @@ def normalize_company(company: dict | None) -> dict:
 
     return {
         "company_name": company.get("company_name", ""),
-        "description": company.get("description", ""),
-        "email": company.get("email", ""),
-        "phone": company.get("phone", ""),
-        "address": company.get("address", ""),
-        "city": company.get("city", ""),
-        "state": company.get("state", ""),
-        "country": company.get("country", ""),
-        "website": company.get("website", ""),
-        "logo": company.get("logo", ""),   # image path / url
+        "description": company.get("description", ""),        
+        "mobile": company.get("mobile", ""),        
+        "logo_url": company.get("logo_url", ""),   # image path / url
     }
 
 @router.post("/{template_id}/preview/{customer_id}")
