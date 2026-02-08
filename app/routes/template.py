@@ -7,7 +7,7 @@ from bson import ObjectId
 import json
 from app.db.connection import db
 from app.utils.auth import require_roles
-from app.services.video_renderer import render_preview,render_image_preview
+from app.services.video_renderer import render_preview
 import uuid
 import os 
 router = APIRouter(prefix="/templates", tags=["Templates"])
@@ -257,22 +257,22 @@ async def preview_template_customer(template_id: str, customer_id: str):
 
     template_type = template.get("type", "video")
 
-    # 🔀 IMAGE
-    if template_type == "image":
-        preview_filename = f"{template_id}_{customer_id}_preview.png"
-        preview_path = os.path.join(media_dir, preview_filename)
+    # # 🔀 IMAGE
+    # if template_type == "image":
+    #     preview_filename = f"{template_id}_{customer_id}_preview.png"
+    #     preview_path = os.path.join(media_dir, preview_filename)
 
-        await run_in_threadpool(
-            render_image_preview,
-            template["template_json"],
-            {
-                "customer": customer,
-                "company": company
-            },
-            preview_path
-        )
+    #     await run_in_threadpool(
+    #         render_image_preview,
+    #         template["template_json"],
+    #         {
+    #             "customer": customer,
+    #             "company": company
+    #         },
+    #         preview_path
+    #     )
 
-        return FileResponse(preview_path, media_type="image/png")
+    #     return FileResponse(preview_path, media_type="image/png")
 
     # 🎥 VIDEO
     preview_filename = f"{template_id}_{customer_id}_preview.mp4"

@@ -64,20 +64,22 @@ def ensure_file_exists(path: str):
 #     return text
 
 def replace_placeholders(text: str, context: dict) -> str:
-    def resolve(path, data):
-        for part in path.split("."):
-            if isinstance(data, dict):
-                data = data.get(part)
-            else:
-                return ""
-        return str(data) if data is not None else ""
+    if not isinstance(text, str):
+        return text
 
-    import re
-    for match in re.findall(r"\{\{(.*?)\}\}", text):
-        value = resolve(match.strip(), context)
-        text = text.replace(f"{{{{{match}}}}}", value)
+    for scope, data in context.items():        # customer, company
+        if not isinstance(data, dict):
+            continue
 
+        for key, value in data.items():
+            if isinstance(value, (str, int, float)):
+                text = text.replace(
+                    f"{{{{{scope}.{key}}}}}",
+                    str(value)
+                )
     return text
+
+
 
 # Function to parse position values
 # Handles strings with 'px' suffix and converts to float
@@ -393,9 +395,11 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx,cus
     scale_val = parse_scale(details.get("transform", "scale(1)"))
     raw_text = item.get("details", {}).get("text", "")
 
-    for key, value in customer.items():
-        raw_text = raw_text.replace(f"{{{{{key}}}}}", value)
-    print("TEXT AFTER REPLACE:", raw_text)
+
+    # for key, value in customer.items():
+    #     raw_text = raw_text.replace(f"{{{{{key}}}}}", value)
+    # print("TEXT AFTER REPLACE:", raw_text)
+    raw_text = replace_placeholders(raw_text, {"customer": customer})
     font_size = int(details.get("fontSize", 40) * scale_val)
     font_size = min(font_size, 200)  # Limit to 200px maximum
     opacity = float(details.get("opacity", 100)) / 100.0
@@ -862,48 +866,48 @@ def safe_float(val):
 #         cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps), "-an", "-t", str(duration), output_path]
 #     subprocess.run(cmd, check=True)
     
-def render_image_preview(template_json, customer, company, output_path):
-    design = template_json["design"]
-    canvas_w = design["size"]["width"]
-    canvas_h = design["size"]["height"]
+# def render_image_preview(template_json, customer, company, output_path):
+#     design = template_json["design"]
+#     canvas_w = design["size"]["width"]
+#     canvas_h = design["size"]["height"]
 
-    inputs = []
-    filters = []
+#     inputs = []
+#     filters = []
 
-    # 1. Background
-    bg = find_background(design)
-    if bg:
-        inputs.append(bg)
-        filters.append(f"[0:v]scale={canvas_w}:{canvas_h}[base]")
-    else:
-        filters.append(f"color=c=transparent:s={canvas_w}x{canvas_h}[base]")
+#     # 1. Background
+#     bg = find_background(design)
+#     if bg:
+#         inputs.append(bg)
+#         filters.append(f"[0:v]scale={canvas_w}:{canvas_h}[base]")
+#     else:
+#         filters.append(f"color=c=transparent:s={canvas_w}x{canvas_h}[base]")
 
-    last = "[base]"
+#     last = "[base]"
 
-    # 2. Images (logo, others)
-    for idx, img in enumerate(image_items):
-        inputs.append(img["src"])
-        filters.append(
-            f"{last}[{idx+1}:v]overlay={img['x']}:{img['y']}[ov{idx}]"
-        )
-        last = f"[ov{idx}]"
+#     # 2. Images (logo, others)
+#     for idx, img in enumerate(image_items):
+#         inputs.append(img["src"])
+#         filters.append(
+#             f"{last}[{idx+1}:v]overlay={img['x']}:{img['y']}[ov{idx}]"
+#         )
+#         last = f"[ov{idx}]"
 
-    # 3. Text
-    last = add_text_filters(filters, last, customer, company)
+#     # 3. Text
+#     last = add_text_filters(filters, last, customer, company)
 
-    # 4. Execute
-    cmd = ["ffmpeg", "-y"]
-    for i in inputs:
-        cmd += ["-i", i]
+#     # 4. Execute
+#     cmd = ["ffmpeg", "-y"]
+#     for i in inputs:
+#         cmd += ["-i", i]
 
-    cmd += [
-        "-filter_complex", ";".join(filters),
-        "-map", last,
-        "-frames:v", "1",
-        output_path
-    ]
+#     cmd += [
+#         "-filter_complex", ";".join(filters),
+#         "-map", last,
+#         "-frames:v", "1",
+#         output_path
+#     ]
 
-    subprocess.run(cmd, check=True)
+#     subprocess.run(cmd, check=True)
 
  
 def render_preview(template_json, customer, output_path):
