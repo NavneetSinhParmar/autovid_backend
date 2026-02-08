@@ -13,7 +13,7 @@ from bson import ObjectId
 from app.db.connection import db 
 from dotenv import load_dotenv
 load_dotenv()
-
+from app.services.render_helper import find_background, get_image_items, get_text_items
 # ---------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------
@@ -903,48 +903,48 @@ def safe_float(val):
 #         cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps), "-an", "-t", str(duration), output_path]
 #     subprocess.run(cmd, check=True)
     
-# def render_image_preview(template_json, customer, company, output_path):
-#     design = template_json["design"]
-#     canvas_w = design["size"]["width"]
-#     canvas_h = design["size"]["height"]
+def render_image_preview(template_json, customer, company, output_path):
+    design = template_json["design"]
+    canvas_w = design["size"]["width"]
+    canvas_h = design["size"]["height"]
 
-#     inputs = []
-#     filters = []
+    inputs = []
+    filters = []
 
-#     # 1. Background
-#     bg = find_background(design)
-#     if bg:
-#         inputs.append(bg)
-#         filters.append(f"[0:v]scale={canvas_w}:{canvas_h}[base]")
-#     else:
-#         filters.append(f"color=c=transparent:s={canvas_w}x{canvas_h}[base]")
+    # 1. Background
+    bg = find_background(design)
+    if bg:
+        inputs.append(bg)
+        filters.append(f"[0:v]scale={canvas_w}:{canvas_h}[base]")
+    else:
+        filters.append(f"color=c=transparent:s={canvas_w}x{canvas_h}[base]")
 
-#     last = "[base]"
+    last = "[base]"
 
-#     # 2. Images (logo, others)
-#     for idx, img in enumerate(image_items):
-#         inputs.append(img["src"])
-#         filters.append(
-#             f"{last}[{idx+1}:v]overlay={img['x']}:{img['y']}[ov{idx}]"
-#         )
-#         last = f"[ov{idx}]"
+    # 2. Images (logo, others)
+    for idx, img in enumerate(image_items):
+        inputs.append(img["src"])
+        filters.append(
+            f"{last}[{idx+1}:v]overlay={img['x']}:{img['y']}[ov{idx}]"
+        )
+        last = f"[ov{idx}]"
 
-#     # 3. Text
-#     last = add_text_filters(filters, last, customer, company)
+    # 3. Text
+    last = add_text_filters(filters, last, customer, company)
 
-#     # 4. Execute
-#     cmd = ["ffmpeg", "-y"]
-#     for i in inputs:
-#         cmd += ["-i", i]
+    # 4. Execute
+    cmd = ["ffmpeg", "-y"]
+    for i in inputs:
+        cmd += ["-i", i]
 
-#     cmd += [
-#         "-filter_complex", ";".join(filters),
-#         "-map", last,
-#         "-frames:v", "1",
-#         output_path
-#     ]
+    cmd += [
+        "-filter_complex", ";".join(filters),
+        "-map", last,
+        "-frames:v", "1",
+        output_path
+    ]
 
-#     subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True)
 
  
 def render_preview(template_json, context_data=None, output_path=None):
