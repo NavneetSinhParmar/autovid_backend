@@ -154,7 +154,22 @@ async def preview_template(template_id: str):
 
     try:
         # 3. Render preview in thread pool
-        await run_in_threadpool(render_preview, template, preview_path)
+        company_context = {}
+        if company_id and company_data:
+            company_context = {
+                "company_name": company_data.get("company_name") or company_data.get("name") or "",
+                "logo_url": company_data.get("logo_url") or company_data.get("logoUrl") or company_data.get("logo") or "",
+                "description": company_data.get("description") or "",
+                "mobile": company_data.get("mobile") or "",
+                "email": company_data.get("email") or "",
+            }
+
+        await run_in_threadpool(
+            render_preview,
+            template,
+            {"customer": {}, "company": company_context},
+            preview_path,
+        )
         
         # return {"status": "success", "preview_url": f"/media/{preview_filename}"}
         return FileResponse(
@@ -280,7 +295,7 @@ async def preview_template_customer(template_id: str, customer_id: str):
 
     await run_in_threadpool(
         render_preview,
-        template["template_json"],
+        template,
         {
             "customer": customer,
             "company": company

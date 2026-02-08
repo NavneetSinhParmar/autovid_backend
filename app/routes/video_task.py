@@ -65,20 +65,18 @@ async def private_video(task_id: str, user=Depends(require_roles("company"))):
 
     return {"task": task}
 
-def replace_placeholders(template_json: dict, customer: dict) -> dict:
-    template_str = json.dumps(template_json)
-
-    replacements = {
-        "{{customer_company_name}}": customer.get("customer_company_name", ""),
-        "{{full_name}}": customer.get("full_name", ""),
-        "{{city}}": customer.get("city", ""),
-        "{{phone_number}}": customer.get("phone_number", "")
-    }
-
-    for key, value in replacements.items():
-        template_str = template_str.replace(key, value)
-
-    return json.loads(template_str)
+def normalize_doc(doc: dict | None) -> dict:
+    if not doc:
+        return {}
+    safe = {}
+    for k, v in doc.items():
+        if k == "_id":
+            safe["id"] = str(v)
+        elif hasattr(v, "isoformat"):
+            safe[k] = v.isoformat()
+        else:
+            safe[k] = str(v) if v is not None else ""
+    return safe
 
 
 @router.get(
@@ -99,11 +97,8 @@ async def public_video_download(
     if not customer:
         raise HTTPException(404, "Customer not found")
 
-    # 3️⃣ Replace placeholders
-    template["template_json"] = replace_placeholders(
-        template["template_json"],
-        customer
-    )
+    customer = normalize_doc(customer)
+    company = normalize_doc(company)
 
     # 4️⃣ Prepare output
     media_dir = os.path.abspath("media")
@@ -114,7 +109,12 @@ async def public_video_download(
 
     # 5️⃣ Render only if not exists
     if not os.path.exists(output_path):
-        await run_in_threadpool(render_preview, template, output_path)
+        await run_in_threadpool(
+            render_preview,
+            template,
+            {"customer": customer, "company": company},
+            output_path,
+        )
 
         # 6️⃣ Create video task entry
         await db.video_tasks.insert_one({

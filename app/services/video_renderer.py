@@ -67,16 +67,31 @@ def replace_placeholders(text: str, context: dict) -> str:
     if not isinstance(text, str):
         return text
 
+    text = re.sub(r"\{\{\s*customer\?\.", "{{customer.", text)
+    text = re.sub(r"\{\{\s*company\?\.", "{{company.", text)
+
+    flat = {}
     for scope, data in context.items():        # customer, company
         if not isinstance(data, dict):
             continue
 
         for key, value in data.items():
+            print(f"Replacing {{{{{scope}.{key}}}}} with {value}")
             if isinstance(value, (str, int, float)):
                 text = text.replace(
                     f"{{{{{scope}.{key}}}}}",
                     str(value)
                 )
+                flat[key] = str(value)
+                if key == "logo_url":
+                    flat["logoUrl"] = str(value)
+                if key == "company_name":
+                    flat["companyName"] = str(value)
+                if key == "customer_company_name":
+                    flat["customerCompanyName"] = str(value)
+
+    for key, value in flat.items():
+        text = text.replace(f"{{{{{key}}}}}", str(value))
     return text
 
 
@@ -385,7 +400,31 @@ def parse_shadow_string(value):
         return {"x": nums[0], "y": nums[1], "color": color or "#000000"}
     return None
 
-def add_text_item_filters(filter_parts, last_label, item, duration, text_idx,customer, canvas_w=None, canvas_h=None):
+def smart_logo_mapping(src: str, size: str = None) -> str:
+    """
+    Intelligently map dummy placeholder URLs to actual logo URLs based on size hints.
+    - 300x150 or small size -> customer.logo_url
+    - 400x200 or large size -> company.logo_url
+    """
+    if not isinstance(src, str):
+        return src
+    
+    # Don't modify if it's already a placeholder
+    if src.startswith("{{") and src.endswith("}}"):
+        return src
+    
+    # Check for dummy placeholder URLs
+    if "placehold.co" in src.lower():
+        if "300x150" in src or "300" in src:
+            return "{{customer.logo_url}}"
+        elif "400x200" in src or "400" in src:
+            return "{{company.logo_url}}"
+        # Default to company for unknown sizes
+        return "{{company.logo_url}}"
+    
+    return src
+
+def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, context, canvas_w=None, canvas_h=None):
     details = item.get("details", {})
     display = item.get("display", {})
     
@@ -395,11 +434,9 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx,cus
     scale_val = parse_scale(details.get("transform", "scale(1)"))
     raw_text = item.get("details", {}).get("text", "")
 
-
-    # for key, value in customer.items():
-    #     raw_text = raw_text.replace(f"{{{{{key}}}}}", value)
-    # print("TEXT AFTER REPLACE:", raw_text)
-    raw_text = replace_placeholders(raw_text, {"customer": customer})
+    if context and isinstance(context, dict):
+        raw_text = replace_placeholders(raw_text, context)
+    print("TEXT AFTER REPLACE:", raw_text)
     font_size = int(details.get("fontSize", 40) * scale_val)
     font_size = min(font_size, 200)  # Limit to 200px maximum
     opacity = float(details.get("opacity", 100)) / 100.0
@@ -592,7 +629,7 @@ def generate_ffmpeg_cmd(template):
         top = float(parse_px(item['details'].get('top', 0)))
         left = left + (orig_w - scaled_w) / 2
         top = top + (orig_h - scaled_h) / 2
-        filter_parts.append(f"[{idx}:v]scale={scaled_w}:{scaled_h},setpts=PTS-STARTPTS[v{idx}];")
+        filter_parts.append(f"[{idx}:v]scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease,setpts=PTS-STARTPTS[v{idx}];")
         filter_parts.append(f"{last_label}[v{idx}]overlay={left}:{top}:enable='between(t,{start},{end})'[o{idx}];")
         last_label = f"[o{idx}]"
         video_labels.append(last_label)
@@ -616,7 +653,7 @@ def generate_ffmpeg_cmd(template):
         y = float(parse_px(item['details'].get('top', 0)))
         x = x + (orig_w - scaled_w) / 2
         y = y + (orig_h - scaled_h) / 2
-        filter_parts.append(f"[{len(video_labels)+idx}:v]scale={scaled_w}:{scaled_h},setpts=PTS-STARTPTS[vimg{idx}];")
+        filter_parts.append(f"[{len(video_labels)+idx}:v]scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease,setpts=PTS-STARTPTS[vimg{idx}];")
         filter_parts.append(f"{last_label}[vimg{idx}]overlay={x}:{y}:enable='between(t,{start},{end})'[oimg{idx}];")
         last_label = f"[oimg{idx}]"
     
@@ -910,11 +947,45 @@ def safe_float(val):
 #     subprocess.run(cmd, check=True)
 
  
-def render_preview(template_json, customer, output_path):
-    design = template_json.get("design", {})
+def render_preview(template_json, context_data=None, output_path=None):
+    if output_path is None and isinstance(context_data, str):
+        output_path = context_data
+        context_data = None
+    # context_data contains both customer and company info
+    # Structure: {"customer": {...}, "company": {...}}
+    if isinstance(context_data, dict) and "customer" in context_data and "company" in context_data:
+        customer = context_data.get("customer")
+        company = context_data.get("company")
+        context = context_data  # Use the full context dict for replacements
+    else:
+        # Fallback for legacy calls
+        customer = context_data if isinstance(context_data, dict) else {}
+        company = {}
+        context = {"customer": customer, "company": company}
+    
+    # Allow passing full template or template_json only
+    if isinstance(template_json, dict) and "template_json" in template_json:
+        full_template = template_json
+        template_json = full_template.get("template_json", {})
+        trim = full_template.get("trim") or {}
+        duration = full_template.get("duration")
+        if not duration and trim.get("end") is not None:
+            duration = float(trim.get("end", 0)) - float(trim.get("start", 0))
+    else:
+        trim = template_json.get("trim") if isinstance(template_json, dict) else {}
+        duration = template_json.get("duration") if isinstance(template_json, dict) else None
+        if not duration and isinstance(trim, dict) and trim.get("end") is not None:
+            duration = float(trim.get("end", 0)) - float(trim.get("start", 0))
+
+    if not duration or duration <= 0:
+        duration = 10
+
+    design = template_json.get("design", {}) if isinstance(template_json, dict) else {}
     track_items_map = design.get("trackItemsMap", {})
     tracks = design.get("tracks", [])
-    duration = float(template_json.get("duration", 10))
+    duration = float(duration)
+    print("customer in render preview", customer)
+    print("company in render preview", company)
 
     canvas_w, canvas_h = resolve_canvas_size(design)
     fps = resolve_fps(design)
@@ -926,32 +997,111 @@ def render_preview(template_json, customer, output_path):
     # -------------------------------------------------
     # 1️⃣ COLLECT INPUTS (VIDEO / IMAGE / AUDIO)
     # -------------------------------------------------
-    for track in tracks:
-        ttype = track.get("type")
-        for item_id in track.get("items", []):
+    track_item_ids = design.get("trackItemIds", [])
+    ordered_visual_ids = [tid for tid in track_item_ids if track_items_map.get(tid, {}).get("type") in ["video", "image"]]
+
+    print(f"\n📍 Track Item IDs: {len(track_item_ids)}")
+    print(f"📍 Ordered Visual IDs: {len(ordered_visual_ids)}")
+    print(f"📍 Using path: {'trackItemIds' if ordered_visual_ids else 'tracks'}")
+
+    if ordered_visual_ids:
+        for item_id in ordered_visual_ids:
             item = track_items_map.get(item_id, {})
             details = item.get("details", {})
-            # src = details.get("src", "")
             src_got = details.get("src", "")
-            src = replace_placeholders(src_got, customer)
+            item_type = item.get("type", "unknown")
+            
+            print(f"\n🔵 VISUAL ITEM ({item_type}) - ID: {item_id}:")
+            print(f"   Full item details: {json.dumps(item, indent=6, default=str)[:500]}...")
+            print(f"   Original src: {src_got}")
+            
+            # Smart mapping for dummy placeholder URLs
+            src_got = smart_logo_mapping(src_got)
+            if src_got.startswith("{{"):
+                print(f"   → Smart mapped to: {src_got}")
+            
+            src = replace_placeholders(src_got, context)
+            print(f"   After placeholder: {src}")
+            
             if not src:
+                print(f"   ⚠️ Skipping - no src after replacement")
                 continue
-
+            
             abs_src = normalize_media_src(src)
-            if not abs_src.startswith("http"):
-                ensure_file_exists(abs_src)
-
-            if ttype in ["video", "image"]:
-                visual_inputs.append({
-                    "src": abs_src,
-                    "item": item,
-                    "media_type": ttype
-                })
-            elif ttype == "audio":
-                audio_inputs.append({
-                    "src": abs_src,
-                    "item": item
-                })
+            print(f"   Normalized path: {abs_src}")
+            
+            # Try to verify file exists, but don't skip on failure
+            if abs_src.startswith("http"):
+                print(f"   ℹ️ Remote URL - Will attempt to use")
+            else:
+                try:
+                    ensure_file_exists(abs_src)
+                    print(f"   ✓ File exists: {abs_src}")
+                except FileNotFoundError as e:
+                    print(f"   ⚠️ File NOT found: {abs_src} - Will try anyway")
+            
+            visual_inputs.append({
+                "src": abs_src,
+                "item": item,
+                "media_type": item_type
+            })
+    else:
+        for track in tracks:
+            ttype = track.get("type")
+            for item_id in track.get("items", []):
+                item = track_items_map.get(item_id, {})
+                details = item.get("details", {})
+                src_got = details.get("src", "")
+                
+                if ttype in ["video", "image"]:
+                    print(f"\n🔵 VISUAL ITEM ({ttype}) from tracks - ID: {item_id}:")
+                    print(f"   Full item details: {json.dumps(item, indent=6, default=str)[:500]}...")
+                    print(f"   Original src: {src_got}")
+                    
+                    # Smart mapping for dummy placeholder URLs
+                    src_got = smart_logo_mapping(src_got)
+                    if src_got.startswith("{{"):
+                        print(f"   → Smart mapped to: {src_got}")
+                    
+                    src = replace_placeholders(src_got, context)
+                    print(f"   After placeholder: {src}")
+                    
+                    if not src:
+                        print(f"   ⚠️ Skipping - no src after replacement")
+                        continue
+                    
+                    abs_src = normalize_media_src(src)
+                    print(f"   Normalized path: {abs_src}")
+                    
+                    if abs_src.startswith("http"):
+                        print(f"   ℹ️ Remote URL - Will attempt to use")
+                    else:
+                        try:
+                            ensure_file_exists(abs_src)
+                            print(f"   ✓ File exists: {abs_src}")
+                        except FileNotFoundError as e:
+                            print(f"   ⚠️ File NOT found: {abs_src} - Will try anyway")
+                    
+                    visual_inputs.append({
+                        "src": abs_src,
+                        "item": item,
+                        "media_type": ttype
+                    })
+                    
+                elif ttype == "audio":
+                    src = replace_placeholders(src_got, context)
+                    if not src:
+                        continue
+                    abs_src = normalize_media_src(src)
+                    if not abs_src.startswith("http"):
+                        try:
+                            ensure_file_exists(abs_src)
+                        except FileNotFoundError:
+                            pass  # Will try anyway
+                    audio_inputs.append({
+                        "src": abs_src,
+                        "item": item
+                    })
 
     # -------------------------------------------------
     # 2️⃣ BASE CANVAS
@@ -985,8 +1135,13 @@ def render_preview(template_json, customer, output_path):
         sc = f"sc{idx}"
         ov = f"ov{idx}"
 
+        opacity = safe_float(details.get("opacity", 100)) / 100.0
+        opacity_filter = ""
+        if opacity < 1.0:
+            opacity_filter = f",format=rgba,colorchannelmixer=aa={opacity:.3f}"
+
         filter_parts.append(
-            f"[{idx}:v]scale={tw}:{th},setpts=PTS-STARTPTS+{start}/TB[{sc}]"
+            f"[{idx}:v]scale={tw}:{th}:force_original_aspect_ratio=decrease{opacity_filter},setpts=PTS-STARTPTS+{start}/TB[{sc}]"
         )
         filter_parts.append(
             f"{last_label}[{sc}]overlay={left}:{top}:enable='between(t,{start},{end})'[{ov}]"
@@ -1008,7 +1163,7 @@ def render_preview(template_json, customer, output_path):
                     item,
                     duration,
                     txt_idx,
-                    customer,
+                    context,
                     canvas_w=canvas_w,
                     canvas_h=canvas_h,
                 )
@@ -1016,18 +1171,29 @@ def render_preview(template_json, customer, output_path):
     # -------------------------------------------------
     # 5️⃣ AUDIO FILTERS (SAFE & DYNAMIC)
     # -------------------------------------------------
-    audio_labels = []
+    audio_sources = []
+    for i, v in enumerate(visual_inputs):
+        if (v.get("media_type") or "").lower() == "video":
+            display = v["item"].get("display", {})
+            start_ms = int(display.get("from", 0))
+            vol = safe_float(v["item"].get("details", {}).get("volume", 100)) / 100.0
+            audio_sources.append({"index": i, "start_ms": start_ms, "volume": vol})
     for i, a in enumerate(audio_inputs):
+        idx = len(visual_inputs) + i
         display = a["item"].get("display", {})
         start_ms = int(display.get("from", 0))
         vol = safe_float(a["item"].get("details", {}).get("volume", 100)) / 100.0
-        vol_filter = f",volume={vol:.3f}" if vol != 1.0 else ""
+        audio_sources.append({"index": idx, "start_ms": start_ms, "volume": vol})
 
-        filter_parts.append(
-            f"[{len(visual_inputs)+i}:a]adelay={start_ms}|{start_ms}"
-            f"{vol_filter},aresample=async=1:first_pts=0[aud{i}]"
-        )
-        audio_labels.append(f"[aud{i}]")
+    audio_labels = []
+    if audio_sources:
+        for i, src in enumerate(audio_sources):
+            vol_filter = f",volume={src['volume']:.3f}" if src["volume"] != 1.0 else ""
+            filter_parts.append(
+                f"[{src['index']}:a]adelay={src['start_ms']}|{src['start_ms']}"
+                f"{vol_filter},aresample=async=1:first_pts=0[aud{i}]"
+            )
+            audio_labels.append(f"[aud{i}]")
 
     if audio_labels:
         filter_parts.append(
@@ -1037,6 +1203,20 @@ def render_preview(template_json, customer, output_path):
     # -------------------------------------------------
     # 6️⃣ BUILD FFMPEG COMMAND
     # -------------------------------------------------
+    
+    # DEBUG: Report on collected inputs
+    print("\n" + "=" * 80)
+    print("📊 COLLECTED INPUTS SUMMARY:")
+    print(f"   Visual inputs: {len(visual_inputs)}")
+    if not visual_inputs:
+        print("   ⚠️ WARNING: No visual inputs collected!")
+    for i, v in enumerate(visual_inputs):
+        print(f"     [{i}] {v['media_type'].upper()}: {v['src']}")
+    print(f"   Audio inputs: {len(audio_inputs)}")
+    for i, a in enumerate(audio_inputs):
+        print(f"     [{i}] AUDIO: {a['src']}")
+    print("=" * 80 + "\n")
+    
     cmd = ["ffmpeg", "-y"]
 
     for v in visual_inputs:
