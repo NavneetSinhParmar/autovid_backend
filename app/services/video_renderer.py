@@ -58,9 +58,25 @@ def ensure_file_exists(path: str):
     if not os.path.exists(path):
         raise FileNotFoundError(f"Media file not found: {path}")
 
-def replace_placeholders(text: str, customer: dict) -> str:
-    for key, value in customer.items():
-        text = text.replace(f"{{{{{key}}}}}", value)
+# def replace_placeholders(text: str, customer: dict) -> str:
+#     for key, value in customer.items():
+#         text = text.replace(f"{{{{{key}}}}}", value)
+#     return text
+
+def replace_placeholders(text: str, context: dict) -> str:
+    def resolve(path, data):
+        for part in path.split("."):
+            if isinstance(data, dict):
+                data = data.get(part)
+            else:
+                return ""
+        return str(data) if data is not None else ""
+
+    import re
+    for match in re.findall(r"\{\{(.*?)\}\}", text):
+        value = resolve(match.strip(), context)
+        text = text.replace(f"{{{{{match}}}}}", value)
+
     return text
 
 # Function to parse position values
