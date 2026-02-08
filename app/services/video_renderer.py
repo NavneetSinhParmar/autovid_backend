@@ -868,7 +868,9 @@ def render_preview(template_json, customer, output_path):
         for item_id in track.get("items", []):
             item = track_items_map.get(item_id, {})
             details = item.get("details", {})
-            src = details.get("src", "")
+            # src = details.get("src", "")
+            src_got = details.get("src", "")
+            src = replace_placeholders(src_got, customer)
             if not src:
                 continue
 
