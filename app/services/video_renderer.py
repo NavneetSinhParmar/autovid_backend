@@ -13,7 +13,11 @@ from bson import ObjectId
 from app.db.connection import db 
 from dotenv import load_dotenv
 load_dotenv()
-from app.services.render_helper import find_background, get_image_items, get_text_items
+from app.services.render_helper import (
+    find_background,
+    get_image_items,
+    get_text_items,    
+)
 # ---------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------
@@ -908,32 +912,80 @@ def render_image_preview(template_json, customer, company, output_path):
     canvas_w = design["size"]["width"]
     canvas_h = design["size"]["height"]
 
+    context = {
+        "customer": customer,
+        "company": company
+    }
+
     inputs = []
     filters = []
 
-    # 1. Background
-    bg = find_background(design)
+    # ----------------------------------
+    # 1️⃣ Background
+    # ----------------------------------
+    bg = find_background(template_json)
+
     if bg:
-        inputs.append(bg)
+        bg_src = bg["details"]["src"]
+        inputs.append(bg_src)
         filters.append(f"[0:v]scale={canvas_w}:{canvas_h}[base]")
+        last = "[base]"
     else:
         filters.append(f"color=c=transparent:s={canvas_w}x{canvas_h}[base]")
+        last = "[base]"
 
-    last = "[base]"
+    input_idx = 1
 
-    # 2. Images (logo, others)
+    # ----------------------------------
+    # 2️⃣ Images (logo etc.)
+    # ----------------------------------
+    image_items = get_image_items(template_json)
+
     for idx, img in enumerate(image_items):
-        inputs.append(img["src"])
+        src = img["details"]["src"]
+        x = int(float(img["details"].get("left", "0px").replace("px", "")))
+        y = int(float(img["details"].get("top", "0px").replace("px", "")))
+
+        inputs.append(src)
+
         filters.append(
-            f"{last}[{idx+1}:v]overlay={img['x']}:{img['y']}[ov{idx}]"
+            f"{last}[{input_idx}:v]overlay={x}:{y}[img{idx}]"
         )
-        last = f"[ov{idx}]"
 
-    # 3. Text
-    last = add_text_filters(filters, last, customer, company)
+        last = f"[img{idx}]"
+        input_idx += 1
 
-    # 4. Execute
+    # ----------------------------------
+    # 3️⃣ Text (INLINE — no add_text_filters)
+    # ----------------------------------
+    text_items = get_text_items(template_json)
+
+    for idx, item in enumerate(text_items):
+        raw_text = item["details"].get("text", "")
+        text = replace_placeholders(raw_text, context)
+
+        if not text:
+            continue
+
+        x = int(float(item["details"].get("left", "0px").replace("px", "")))
+        y = int(float(item["details"].get("top", "0px").replace("px", "")))
+        font_size = int(item["details"].get("fontSize", 32))
+        color = item["details"].get("color", "#ffffff").replace("#", "")
+        font = item["details"].get("fontFamily", "Arial")
+
+        filters.append(
+            f"{last}drawtext=text='{text}':"
+            f"x={x}:y={y}:fontsize={font_size}:fontcolor={color}"
+            f"[txt{idx}]"
+        )
+
+        last = f"[txt{idx}]"
+
+    # ----------------------------------
+    # 4️⃣ FFmpeg execution
+    # ----------------------------------
     cmd = ["ffmpeg", "-y"]
+
     for i in inputs:
         cmd += ["-i", i]
 
@@ -946,7 +998,6 @@ def render_image_preview(template_json, customer, company, output_path):
 
     subprocess.run(cmd, check=True)
 
- 
 def render_preview(template_json, context_data=None, output_path=None):
     if output_path is None and isinstance(context_data, str):
         output_path = context_data
