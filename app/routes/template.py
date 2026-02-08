@@ -232,45 +232,52 @@ async def preview_template_customer(template_id: str, customer_id: str):
 
     customer = normalize_customer(customer)
 
+    # ✅ FETCH COMPANY
+    company = None
+    if customer.get("linked_company_id"):
+        company = await db.companies.find_one({
+            "_id": ObjectId(customer["linked_company_id"])
+        })
+
+    company = normalize_company(company) if company else {}
+
     media_dir = os.path.abspath("media")
     os.makedirs(media_dir, exist_ok=True)
 
     template_type = template.get("type", "video")
-    print("Template type is",template_type)
-    # 🔀 decide output based on type
+
+    # 🔀 IMAGE
     if template_type == "image":
         preview_filename = f"{template_id}_{customer_id}_preview.png"
         preview_path = os.path.join(media_dir, preview_filename)
 
         await run_in_threadpool(
-            render_image_preview,              # 👈 NEW FUNCTION
+            render_image_preview,
             template["template_json"],
-            customer,
+            {
+                "customer": customer,
+                "company": company
+            },
             preview_path
         )
 
-        return FileResponse(
-            preview_path,
-            media_type="image/png",
-            filename=preview_filename
-        )
+        return FileResponse(preview_path, media_type="image/png")
 
-    # 🎥 default = video
+    # 🎥 VIDEO
     preview_filename = f"{template_id}_{customer_id}_preview.mp4"
     preview_path = os.path.join(media_dir, preview_filename)
 
     await run_in_threadpool(
-        render_preview,                        # 👈 EXISTING FUNCTION
+        render_preview,
         template["template_json"],
-        customer,
+        {
+            "customer": customer,
+            "company": company
+        },
         preview_path
     )
 
-    return FileResponse(
-        preview_path,
-        media_type="video/mp4",
-        filename=preview_filename
-    )
+    return FileResponse(preview_path, media_type="video/mp4")
 
 @router.get("/{template_id}/download/{customer_id}")
 async def download_video(template_id: str, customer_id: str):
