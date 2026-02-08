@@ -219,6 +219,23 @@ def normalize_customer(customer: dict) -> dict:
             safe[k] = str(v) if v is not None else ""
     return safe
 
+def normalize_company(company: dict | None) -> dict:
+    if not company:
+        return {}
+
+    return {
+        "company_name": company.get("company_name", ""),
+        "description": company.get("description", ""),
+        "email": company.get("email", ""),
+        "phone": company.get("phone", ""),
+        "address": company.get("address", ""),
+        "city": company.get("city", ""),
+        "state": company.get("state", ""),
+        "country": company.get("country", ""),
+        "website": company.get("website", ""),
+        "logo": company.get("logo", ""),   # image path / url
+    }
+
 @router.post("/{template_id}/preview/{customer_id}")
 async def preview_template_customer(template_id: str, customer_id: str):
 
