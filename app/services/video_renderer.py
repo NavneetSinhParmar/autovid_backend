@@ -685,103 +685,258 @@ def safe_float(val):
     except (ValueError, IndexError):
         return 0.0
 
+
+# def render_preview(template_json, customer, output_path):
+#     design = template_json.get("design", {})
+#     track_items_map = design.get("trackItemsMap", {})
+#     tracks = design.get("tracks", [])
+#     duration = float(template_json.get("duration", 10))
+#     canvas_w, canvas_h = resolve_canvas_size(design)
+#     fps = resolve_fps(design)
+    
+#     filter_parts = []
+#     visual_inputs = [] 
+#     audio_inputs = []  
+    
+#     # 1. Base Layer (Background Canvas)
+#     filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]")
+#     last_label = "[base]"
+
+#     # 2. SEPARATE INPUTS (Videos, Images, Audio) with stable order
+#     track_item_ids = design.get("trackItemIds", [])
+#     ordered_visual_ids = [tid for tid in track_item_ids if track_items_map.get(tid, {}).get("type") in ["video", "image"]]
+
+#     if ordered_visual_ids:
+#         for item_id in ordered_visual_ids:
+#             item = track_items_map.get(item_id, {})
+#             details = item.get("details", {})
+#             src = details.get("src", "")
+#             # src_got = details.get("src", "")
+#             # src = replace_placeholders(details["src"], customer)
+#             if not src:
+#                 continue
+#             abs_src = normalize_media_src(src)
+#             if not abs_src.startswith("http"):
+#                 ensure_file_exists(abs_src)
+#             visual_inputs.append({"src": abs_src, "item": item, "media_type": item.get("type")})
+#     else:
+#         for track in tracks:
+#             itype = track.get("type")
+#             for item_id in track.get("items", []):
+#                 item = track_items_map.get(item_id, {})
+#                 details = item.get("details", {})
+#                 src = details.get("src", "")
+#                 if not src:
+#                     continue
+#                 if itype in ["video", "image"] or item.get("type") in ["video", "image"]:
+#                     abs_src = normalize_media_src(src)
+#                     if not abs_src.startswith("http"):
+#                         ensure_file_exists(abs_src)
+#                     media_type = item.get("type") or itype
+#                     visual_inputs.append({"src": abs_src, "item": item, "media_type": media_type})
+#                 elif itype == "audio":
+#                     abs_src = normalize_media_src(src)
+#                     if not abs_src.startswith("http"):
+#                         ensure_file_exists(abs_src)
+#                     audio_inputs.append({"src": abs_src, "item": item})
+
+#     if tracks:
+#         for track in tracks:
+#             if track.get("type") == "audio":
+#                 for item_id in track.get("items", []):
+#                     item = track_items_map.get(item_id, {})
+#                     details = item.get("details", {})
+#                     src = details.get("src", "")
+#                     if not src:
+#                         continue
+#                     abs_src = normalize_media_src(src)
+#                     if not abs_src.startswith("http"):
+#                         ensure_file_exists(abs_src)
+#                     audio_inputs.append({"src": abs_src, "item": item})
+
+#     # 3. BUILD VISUAL FILTERS (Videos & Images)
+#     for idx, data in enumerate(visual_inputs):
+#         item, details = data["item"], data["item"].get("details", {})
+#         display = item.get("display", {})
+#         start, end = display.get("from", 0)/1000, display.get("to", duration*1000)/1000
+        
+#         # Scale handling (fix comma error)
+#         scale_val = parse_scale(details.get("transform", "scale(1)"))
+
+#         # Scaling and Positioning (center-origin scaling like editor)
+#         orig_w = safe_float(details.get("width", canvas_w))
+#         orig_h = safe_float(details.get("height", canvas_h))
+#         tw = to_even(orig_w * scale_val)
+#         th = to_even(orig_h * scale_val)
+#         left = safe_float(details.get("left", 0))
+#         top = safe_float(details.get("top", 0))
+#         left = left + (orig_w - tw) / 2
+#         top = top + (orig_h - th) / 2
+
+#         scaled, overlaid = f"sc{idx}", f"ov{idx}"
+#         filter_parts.append(f"[{idx}:v]scale={tw}:{th},setpts=PTS-STARTPTS+{start}/TB[{scaled}]")
+#         filter_parts.append(f"{last_label}[{scaled}]overlay={left}:{top}:enable='between(t,{start},{end})'[{overlaid}]")
+#         last_label = f"[{overlaid}]"
+
+#     # 4. HANDLE TEXT (Dynamic JSON Styles)
+#     txt_idx = 0
+#     for track in tracks:
+#         if track.get("type") == "text":
+#             for item_id in track.get("items", []):
+#                 item = track_items_map.get(item_id, {})
+#                 print("caling add to text func")
+#                 last_label, txt_idx = add_text_item_filters(
+#                     filter_parts,
+#                     last_label,
+#                     item,
+#                     duration,
+#                     txt_idx,
+#                     customer,
+#                     canvas_w=canvas_w,  # Add canvas dimensions
+#                     canvas_h=canvas_h,
+#                 )
+
+#     # 5. AUDIO MIXING
+#     audio_mix_filter = ""
+#     audio_sources = []
+#     for i, v in enumerate(visual_inputs):
+#         if (v.get("media_type") or "").lower() == "video":
+#             display = v["item"].get("display", {})
+#             a_start = int(display.get("from", 0))
+#             vol = safe_float(v["item"].get("details", {}).get("volume", 100)) / 100.0
+#             audio_sources.append({"index": i, "start_ms": a_start, "volume": vol})
+#     for i, a in enumerate(audio_inputs):
+#         idx = len(visual_inputs) + i
+#         a_start = int(a["item"].get("display", {}).get("from", 0))
+#         vol = safe_float(a["item"].get("details", {}).get("volume", 100)) / 100.0
+#         audio_sources.append({"index": idx, "start_ms": a_start, "volume": vol})
+
+#     if audio_sources:
+#         a_labels = ""
+#         for i, src in enumerate(audio_sources):
+#             a_start = max(0, int(src["start_ms"]))
+#             volume = src["volume"]
+#             vol_filter = f",volume={volume:.3f}" if volume != 1.0 else ""
+#             a_labels += f"[{src['index']}:a]adelay={a_start}|{a_start}{vol_filter},aresample=async=1:first_pts=0[aud{i}];"
+#         audio_mix_filter = (
+#             f"{a_labels}" + "".join([f"[aud{i}]" for i in range(len(audio_sources))]) +
+#             f"amix=inputs={len(audio_sources)}:normalize=0[outa]"
+#         )
+
+#     # 6. EXECUTION
+#     cmd = ["ffmpeg", "-y"]
+#     for v in visual_inputs:
+#         if (v.get("media_type") or "").lower() == "image":
+#             cmd += ["-loop", "1", "-t", str(duration), "-i", v["src"]]
+#         else:
+#             cmd += ["-i", v["src"]]
+#     for a in audio_inputs:
+#         cmd += ["-i", a["src"]]
+
+#     full_filter = ";".join(filter_parts)
+#     if audio_mix_filter:
+#         full_filter += ";" + audio_mix_filter
+#         cmd += ["-filter_complex", full_filter, "-map", last_label, "-map", "[outa]"]
+#     else:
+#         cmd += ["-filter_complex", full_filter, "-map", last_label]
+
+#     if audio_mix_filter:
+#         cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps), "-c:a", "aac", "-t", str(duration), output_path]
+#     else:
+#         cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps), "-an", "-t", str(duration), output_path]
+#     subprocess.run(cmd, check=True)
+    
+    
 def render_preview(template_json, customer, output_path):
     design = template_json.get("design", {})
     track_items_map = design.get("trackItemsMap", {})
     tracks = design.get("tracks", [])
     duration = float(template_json.get("duration", 10))
+
     canvas_w, canvas_h = resolve_canvas_size(design)
     fps = resolve_fps(design)
-    
+
     filter_parts = []
-    visual_inputs = [] 
-    audio_inputs = []  
-    
-    # 1. Base Layer (Background Canvas)
-    filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]")
-    last_label = "[base]"
+    visual_inputs = []
+    audio_inputs = []
 
-    # 2. SEPARATE INPUTS (Videos, Images, Audio) with stable order
-    track_item_ids = design.get("trackItemIds", [])
-    ordered_visual_ids = [tid for tid in track_item_ids if track_items_map.get(tid, {}).get("type") in ["video", "image"]]
-
-    if ordered_visual_ids:
-        for item_id in ordered_visual_ids:
+    # -------------------------------------------------
+    # 1️⃣ COLLECT INPUTS (VIDEO / IMAGE / AUDIO)
+    # -------------------------------------------------
+    for track in tracks:
+        ttype = track.get("type")
+        for item_id in track.get("items", []):
             item = track_items_map.get(item_id, {})
             details = item.get("details", {})
             src = details.get("src", "")
             if not src:
                 continue
+
             abs_src = normalize_media_src(src)
             if not abs_src.startswith("http"):
                 ensure_file_exists(abs_src)
-            visual_inputs.append({"src": abs_src, "item": item, "media_type": item.get("type")})
-    else:
-        for track in tracks:
-            itype = track.get("type")
-            for item_id in track.get("items", []):
-                item = track_items_map.get(item_id, {})
-                details = item.get("details", {})
-                src = details.get("src", "")
-                if not src:
-                    continue
-                if itype in ["video", "image"] or item.get("type") in ["video", "image"]:
-                    abs_src = normalize_media_src(src)
-                    if not abs_src.startswith("http"):
-                        ensure_file_exists(abs_src)
-                    media_type = item.get("type") or itype
-                    visual_inputs.append({"src": abs_src, "item": item, "media_type": media_type})
-                elif itype == "audio":
-                    abs_src = normalize_media_src(src)
-                    if not abs_src.startswith("http"):
-                        ensure_file_exists(abs_src)
-                    audio_inputs.append({"src": abs_src, "item": item})
 
-    if tracks:
-        for track in tracks:
-            if track.get("type") == "audio":
-                for item_id in track.get("items", []):
-                    item = track_items_map.get(item_id, {})
-                    details = item.get("details", {})
-                    src = details.get("src", "")
-                    if not src:
-                        continue
-                    abs_src = normalize_media_src(src)
-                    if not abs_src.startswith("http"):
-                        ensure_file_exists(abs_src)
-                    audio_inputs.append({"src": abs_src, "item": item})
+            if ttype in ["video", "image"]:
+                visual_inputs.append({
+                    "src": abs_src,
+                    "item": item,
+                    "media_type": ttype
+                })
+            elif ttype == "audio":
+                audio_inputs.append({
+                    "src": abs_src,
+                    "item": item
+                })
 
-    # 3. BUILD VISUAL FILTERS (Videos & Images)
+    # -------------------------------------------------
+    # 2️⃣ BASE CANVAS
+    # -------------------------------------------------
+    filter_parts.append(
+        f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]"
+    )
+    last_label = "[base]"
+
+    # -------------------------------------------------
+    # 3️⃣ VISUAL FILTERS
+    # -------------------------------------------------
     for idx, data in enumerate(visual_inputs):
-        item, details = data["item"], data["item"].get("details", {})
+        item = data["item"]
+        details = item.get("details", {})
         display = item.get("display", {})
-        start, end = display.get("from", 0)/1000, display.get("to", duration*1000)/1000
-        
-        # Scale handling (fix comma error)
-        scale_val = parse_scale(details.get("transform", "scale(1)"))
 
-        # Scaling and Positioning (center-origin scaling like editor)
+        start = display.get("from", 0) / 1000
+        end = display.get("to", duration * 1000) / 1000
+
+        scale = parse_scale(details.get("transform", "scale(1)"))
         orig_w = safe_float(details.get("width", canvas_w))
         orig_h = safe_float(details.get("height", canvas_h))
-        tw = to_even(orig_w * scale_val)
-        th = to_even(orig_h * scale_val)
-        left = safe_float(details.get("left", 0))
-        top = safe_float(details.get("top", 0))
-        left = left + (orig_w - tw) / 2
-        top = top + (orig_h - th) / 2
 
-        scaled, overlaid = f"sc{idx}", f"ov{idx}"
-        filter_parts.append(f"[{idx}:v]scale={tw}:{th},setpts=PTS-STARTPTS+{start}/TB[{scaled}]")
-        filter_parts.append(f"{last_label}[{scaled}]overlay={left}:{top}:enable='between(t,{start},{end})'[{overlaid}]")
-        last_label = f"[{overlaid}]"
+        tw = to_even(orig_w * scale)
+        th = to_even(orig_h * scale)
 
-    # 4. HANDLE TEXT (Dynamic JSON Styles)
+        left = safe_float(details.get("left", 0)) + (orig_w - tw) / 2
+        top = safe_float(details.get("top", 0)) + (orig_h - th) / 2
+
+        sc = f"sc{idx}"
+        ov = f"ov{idx}"
+
+        filter_parts.append(
+            f"[{idx}:v]scale={tw}:{th},setpts=PTS-STARTPTS+{start}/TB[{sc}]"
+        )
+        filter_parts.append(
+            f"{last_label}[{sc}]overlay={left}:{top}:enable='between(t,{start},{end})'[{ov}]"
+        )
+
+        last_label = f"[{ov}]"
+
+    # -------------------------------------------------
+    # 4️⃣ TEXT FILTERS
+    # -------------------------------------------------
     txt_idx = 0
     for track in tracks:
         if track.get("type") == "text":
             for item_id in track.get("items", []):
                 item = track_items_map.get(item_id, {})
-                print("caling add to text func")
                 last_label, txt_idx = add_text_item_filters(
                     filter_parts,
                     last_label,
@@ -789,61 +944,66 @@ def render_preview(template_json, customer, output_path):
                     duration,
                     txt_idx,
                     customer,
-                    canvas_w=canvas_w,  # Add canvas dimensions
+                    canvas_w=canvas_w,
                     canvas_h=canvas_h,
                 )
 
-    # 5. AUDIO MIXING
-    audio_mix_filter = ""
-    audio_sources = []
-    for i, v in enumerate(visual_inputs):
-        if (v.get("media_type") or "").lower() == "video":
-            display = v["item"].get("display", {})
-            a_start = int(display.get("from", 0))
-            vol = safe_float(v["item"].get("details", {}).get("volume", 100)) / 100.0
-            audio_sources.append({"index": i, "start_ms": a_start, "volume": vol})
+    # -------------------------------------------------
+    # 5️⃣ AUDIO FILTERS (SAFE & DYNAMIC)
+    # -------------------------------------------------
+    audio_labels = []
     for i, a in enumerate(audio_inputs):
-        idx = len(visual_inputs) + i
-        a_start = int(a["item"].get("display", {}).get("from", 0))
+        display = a["item"].get("display", {})
+        start_ms = int(display.get("from", 0))
         vol = safe_float(a["item"].get("details", {}).get("volume", 100)) / 100.0
-        audio_sources.append({"index": idx, "start_ms": a_start, "volume": vol})
+        vol_filter = f",volume={vol:.3f}" if vol != 1.0 else ""
 
-    if audio_sources:
-        a_labels = ""
-        for i, src in enumerate(audio_sources):
-            a_start = max(0, int(src["start_ms"]))
-            volume = src["volume"]
-            vol_filter = f",volume={volume:.3f}" if volume != 1.0 else ""
-            a_labels += f"[{src['index']}:a]adelay={a_start}|{a_start}{vol_filter},aresample=async=1:first_pts=0[aud{i}];"
-        audio_mix_filter = (
-            f"{a_labels}" + "".join([f"[aud{i}]" for i in range(len(audio_sources))]) +
-            f"amix=inputs={len(audio_sources)}:normalize=0[outa]"
+        filter_parts.append(
+            f"[{len(visual_inputs)+i}:a]adelay={start_ms}|{start_ms}"
+            f"{vol_filter},aresample=async=1:first_pts=0[aud{i}]"
+        )
+        audio_labels.append(f"[aud{i}]")
+
+    if audio_labels:
+        filter_parts.append(
+            f"{''.join(audio_labels)}amix=inputs={len(audio_labels)}:normalize=0[outa]"
         )
 
-    # 6. EXECUTION
+    # -------------------------------------------------
+    # 6️⃣ BUILD FFMPEG COMMAND
+    # -------------------------------------------------
     cmd = ["ffmpeg", "-y"]
+
     for v in visual_inputs:
-        if (v.get("media_type") or "").lower() == "image":
+        if v["media_type"] == "image":
             cmd += ["-loop", "1", "-t", str(duration), "-i", v["src"]]
         else:
             cmd += ["-i", v["src"]]
+
     for a in audio_inputs:
         cmd += ["-i", a["src"]]
 
-    full_filter = ";".join(filter_parts)
-    if audio_mix_filter:
-        full_filter += ";" + audio_mix_filter
-        cmd += ["-filter_complex", full_filter, "-map", last_label, "-map", "[outa]"]
-    else:
-        cmd += ["-filter_complex", full_filter, "-map", last_label]
+    cmd += [
+        "-filter_complex", ";".join(filter_parts),
+        "-map", last_label
+    ]
 
-    if audio_mix_filter:
-        cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps), "-c:a", "aac", "-t", str(duration), output_path]
+    if audio_labels:
+        cmd += ["-map", "[outa]", "-c:a", "aac"]
     else:
-        cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps), "-an", "-t", str(duration), output_path]
+        cmd += ["-an"]
+
+    cmd += [
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-r", str(fps),
+        "-t", str(duration),
+        output_path
+    ]
+
     subprocess.run(cmd, check=True)
-    
-    
+
+
 def render_video(task_id: str):
     task = db.video_tasks.find_one({"_id": ObjectId(task_id)})
     template = db.templates.find_one({"_id": ObjectId(task["template_id"])})
