@@ -24,6 +24,7 @@ from app.services.render_helper import (
 DEBUG = os.getenv("DEBUG", "False").lower() == "true" 
 MEDIA_ROOT = os.getenv("MEDIA_ROOT", "media")
 FFMPEG = "ffmpeg"
+FFPROBE = "ffprobe"
 
 BASE_DIR = os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))
@@ -61,6 +62,21 @@ def abs_media_path(path: str) -> str:
 def ensure_file_exists(path: str):
     if not os.path.exists(path):
         raise FileNotFoundError(f"Media file not found: {path}")
+
+def has_audio_stream(src: str) -> bool:
+    try:
+        cmd = [
+            FFPROBE,
+            "-v", "error",
+            "-select_streams", "a:0",
+            "-show_entries", "stream=codec_type",
+            "-of", "csv=p=0",
+            src,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return result.returncode == 0 and result.stdout.strip() != ""
+    except Exception:
+        return False
 
 # def replace_placeholders(text: str, customer: dict) -> str:
 #     for key, value in customer.items():
@@ -1225,24 +1241,66 @@ def render_preview(template_json, context_data=None, output_path=None):
     audio_sources = []
     for i, v in enumerate(visual_inputs):
         if (v.get("media_type") or "").lower() == "video":
+            if not has_audio_stream(v["src"]):
+                continue
             display = v["item"].get("display", {})
+            trim = v["item"].get("trim", {})
             start_ms = int(display.get("from", 0))
+            end_ms = int(display.get("to", duration * 1000))
+            trim_from = int(trim.get("from", 0))
+            trim_to = trim.get("to")
+            if trim_to is not None:
+                trim_to = int(trim_to)
             vol = safe_float(v["item"].get("details", {}).get("volume", 100)) / 100.0
-            audio_sources.append({"index": i, "start_ms": start_ms, "volume": vol})
+            if vol <= 0:
+                continue
+            audio_sources.append({
+                "index": i,
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "trim_from": trim_from,
+                "trim_to": trim_to,
+                "volume": vol,
+            })
+
     for i, a in enumerate(audio_inputs):
         idx = len(visual_inputs) + i
         display = a["item"].get("display", {})
+        trim = a["item"].get("trim", {})
         start_ms = int(display.get("from", 0))
+        end_ms = int(display.get("to", duration * 1000))
+        trim_from = int(trim.get("from", 0))
+        trim_to = trim.get("to")
+        if trim_to is not None:
+            trim_to = int(trim_to)
         vol = safe_float(a["item"].get("details", {}).get("volume", 100)) / 100.0
-        audio_sources.append({"index": idx, "start_ms": start_ms, "volume": vol})
+        if vol <= 0:
+            continue
+        audio_sources.append({
+            "index": idx,
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+            "trim_from": trim_from,
+            "trim_to": trim_to,
+            "volume": vol,
+        })
 
     audio_labels = []
     if audio_sources:
         for i, src in enumerate(audio_sources):
+            display_dur_ms = max(0, src["end_ms"] - src["start_ms"])
+            trim_len_ms = display_dur_ms
+            if src["trim_to"] is not None:
+                trim_len_ms = max(0, src["trim_to"] - src["trim_from"])
+                trim_len_ms = min(trim_len_ms, display_dur_ms)
+            duration_sec = max(0.0, trim_len_ms / 1000.0)
+            if duration_sec <= 0:
+                continue
+            start_sec = max(0.0, src["trim_from"] / 1000.0)
             vol_filter = f",volume={src['volume']:.3f}" if src["volume"] != 1.0 else ""
             filter_parts.append(
-                f"[{src['index']}:a]adelay={src['start_ms']}|{src['start_ms']}"
-                f"{vol_filter},aresample=async=1:first_pts=0[aud{i}]"
+                f"[{src['index']}:a]atrim=start={start_sec}:duration={duration_sec},asetpts=PTS-STARTPTS"
+                f"{vol_filter},adelay={src['start_ms']}|{src['start_ms']},aresample=async=1:first_pts=0[aud{i}]"
             )
             audio_labels.append(f"[aud{i}]")
 
