@@ -1,3 +1,4 @@
+from annotated_types import doc
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime
 from bson import ObjectId
@@ -11,6 +12,8 @@ from app.utils.auth import require_roles, hash_password
 from app.models.customer_model import CustomerCreate, CustomerOut
 from fastapi import Request, UploadFile, File, Form
 from app.services.storage import save_customer_file
+from app.services.url import build_media_url
+from fastapi import Request
 
 router = APIRouter(prefix="/customer", tags=["Customer Management"])
 print("Customer router loaded")
@@ -440,7 +443,7 @@ async def create_customer_handler(
 # 🔵 LIST CUSTOMERS WITH USER + COMPANY JOIN
 # --------------------------------------------------------
 @router.get("/")
-async def list_customers(user=Depends(require_roles("superadmin", "company"))):
+async def list_customers(request: Request,user=Depends(require_roles("superadmin", "company"))):
 
     pipeline = [
         {
@@ -471,11 +474,23 @@ async def list_customers(user=Depends(require_roles("superadmin", "company"))):
         doc["user_id"] = str(doc["user_id"])
         doc["linked_company_id"] = str(doc["linked_company_id"])
 
+         # ✅ CUSTOMER LOGO FIX
+        if doc.get("logo_url"):
+            doc["logo_url"] = f"media/{doc['logo_url']}"
+
         doc["user"]["id"] = str(doc["user"].pop("_id"))
         doc["user"].pop("password")
 
+
+        # ✅ COMPANY SAFE FIX
+        # COMPANY
         if doc.get("company"):
             doc["company"]["id"] = str(doc["company"].pop("_id"))
+
+            if doc["company"].get("logo_url") and not doc["company"]["logo_url"].startswith("media/"):
+                doc["company"]["logo_url"] = f"media/{doc['company']['logo_url']}"
+        else:
+            doc["company"] = None
 
         data.append(doc)
 
@@ -518,12 +533,25 @@ async def get_customer(customer_id: str, user=Depends(require_roles("superadmin"
     doc["id"] = str(doc.pop("_id"))
     doc["user_id"] = str(doc["user_id"])
     doc["linked_company_id"] = str(doc["linked_company_id"])
+    # ✅ CUSTOMER LOGO FIX
+    if doc.get("logo_url"):
+        doc["logo_url"] = f"media/{doc['logo_url']}"
 
     doc["user"]["id"] = str(doc["user"].pop("_id"))
     doc["user"].pop("password")
 
+     # ========================
+    # COMPANY SAFE FIX
+    # ========================
     if doc.get("company"):
-        doc["company"]["id"] = str(doc["company"].pop("_id"))
+        company = doc["company"]
+
+        company["id"] = str(company.pop("_id"))
+
+        if company.get("logo_url") and not company["logo_url"].startswith("media/"):
+            company["logo_url"] = f"media/{company['logo_url']}"
+    else:
+        doc["company"] = None
 
     return doc
 
