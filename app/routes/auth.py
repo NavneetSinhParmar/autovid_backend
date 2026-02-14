@@ -103,6 +103,11 @@ async def get_profile(user=Depends(get_current_user)):
         company = await db.companies.find_one({"user_id": user_id})
         if company:
             company["id"] = str(company["_id"])
+
+        # Fix logo path before returning
+        if company.get("logo_url"):
+            company["logo_url"] = f"./media/{company['logo_url']}"
+
             return {
                 "role": "company",
                 "id": company["id"],
@@ -110,7 +115,8 @@ async def get_profile(user=Depends(get_current_user)):
                 "email": user["email"],      # email from users table
                 "mobile": company["mobile"],
                 "status": company["status"],
-                "logo_url": company.get("logo_url")
+                "logo_url": company.get("logo_url"),
+
             }
         raise HTTPException(status_code=404, detail="Company profile not found")
 

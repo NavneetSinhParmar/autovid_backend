@@ -73,7 +73,7 @@ async def create_company(
 
 # 🔵 Get all companies
 @router.get("/")
-async def list_companies(user=Depends(require_roles("superadmin"))):
+async def list_companies(request: Request, user=Depends(require_roles("superadmin"))):
     companies = []
 
     async for c in db.companies.find():
@@ -81,6 +81,10 @@ async def list_companies(user=Depends(require_roles("superadmin"))):
         # fix company id
         c["company_id"] = str(c["_id"])
         c.pop("_id", None)
+
+         # ✅ FIX LOGO URL HERE
+        if c.get("logo_url"):
+            c["logo_url"] = f"media/{c['logo_url']}"
 
         # join user
         user_data = await db.users.find_one(
