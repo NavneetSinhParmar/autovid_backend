@@ -1,36 +1,34 @@
 [
   {
-    "company_id": "695de5db61e32ffac0d26487",
-    "template_name": "3 img 2 video 2 text",
-    "category": "Alphabet",
+    "company_id": "691c6d686ad325a3e62e7e75",
+    "template_name": "dasdasdasd",
+    "category": "Anniversary",
     "base_video_url": [
-      "./media/695de5db61e32ffac0d26487/be648ac6ebd44d3db6cf989a320d7953_upload.mp4",
-      "./media/695de5db61e32ffac0d26487/a303f2c30ede489882136a7f065d9400_upload.mp4"
+      "./media/691c6d686ad325a3e62e7e75/12eab0dd3aa84b88b24b34893b1a0d2b_upload.mp4"
     ],
     "base_image_url": [
-      "./media/695de5db61e32ffac0d26487/7dd9c5981b864c59aeb3c6a5aa1d658a_upload.jpg",
-      "./media/695de5db61e32ffac0d26487/05bf34680b2645ea938cff350f6aadbe_upload.jpg",
-      "./media/695de5db61e32ffac0d26487/a8804a231ec64112aa9faf4c2add0e54_upload.jpg"
+      "./media/691c6d686ad325a3e62e7e75/cb9dce9e7768404594017b122d2d9a6c_upload.jpg"
     ],
     "base_audio_url": [
-      "./media/695de5db61e32ffac0d26487/66bf67ba21af4d26a358d0008c728290_upload.mp3"
+      "./media/691c6d686ad325a3e62e7e75/aec2ad42467940b3a82b0d4995ff610a_upload.mp3"
     ],
-    "duration": 21.64191489361703,
+    "duration": 11.303191489361703,
     "trim": {
       "start": 0,
-      "end": 21.64191489361703
+      "end": 11.303191489361703
     },
     "template_json": {
       "design": {
-        "id": "yDlDd25Nj0BYmp",
+        "id": "zqBHBmZ7CH7gi7LY",
         "fps": 30,
         "size": {
-          "width": 1080,
-          "height": 1920
+          "width": 1920,
+          "height": 1080,
+          "name": "16:9"
         },
         "tracks": [
           {
-            "id": "UofN4jCwdXlsQAX_LHr2t",
+            "id": "UdSN6C019cOicS-2d0hXV",
             "accepts": [
               "text",
               "image",
@@ -53,42 +51,13 @@
               "progressSquare"
             ],
             "type": "text",
-            "items": ["J8PtN5ravO6zADtTRvzV-"],
+            "items": ["7ucM_xEtXzUlwRIw1f50B"],
             "magnetic": false,
             "static": false,
             "muted": false
           },
           {
-            "id": "17hsbFpCdcd6w2GGMtxLu",
-            "accepts": [
-              "text",
-              "image",
-              "video",
-              "audio",
-              "composition",
-              "caption",
-              "template",
-              "customTrack",
-              "customTrack2",
-              "illustration",
-              "custom",
-              "main",
-              "shape",
-              "linealAudioBars",
-              "radialAudioBars",
-              "progressFrame",
-              "progressBar",
-              "rect",
-              "progressSquare"
-            ],
-            "type": "text",
-            "items": ["Y7P5Fvr40_lYNMxnYz4B0"],
-            "magnetic": false,
-            "static": false,
-            "muted": false
-          },
-          {
-            "id": "4HgHOwapdPhFjCHSNdE_t",
+            "id": "q68lB9KrxCw4KysZrRMDZ",
             "accepts": [
               "text",
               "image",
@@ -111,13 +80,158 @@
               "progressSquare"
             ],
             "type": "audio",
-            "items": ["btBKARF2eqWQfyFZ"],
+            "items": ["Qjfq66ilwzDe4q78"],
             "magnetic": false,
             "static": false,
             "muted": false
           },
           {
-            "id": "86BMmbWfUoa5CRVIKulma",
+            "id": "4Z_bhkQAmniVManBeNngf",
+            "accepts": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "composition",
+              "caption",
+              "template",
+              "customTrack",
+              "customTrack2",
+              "illustration",
+              "custom",
+              "main",
+              "shape",
+              "linealAudioBars",
+              "radialAudioBars",
+              "progressFrame",
+              "progressBar",
+              "rect",
+              "progressSquare"
+            ],
+            "type": "text",
+            "items": ["UQoIJ4-BgwGQ_BKaoNbPx"],
+            "magnetic": false,
+            "static": false,
+            "muted": false
+          },
+          {
+            "id": "uNAJwHdX4D1eH9mbvoXEk",
+            "accepts": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "composition",
+              "caption",
+              "template",
+              "customTrack",
+              "customTrack2",
+              "illustration",
+              "custom",
+              "main",
+              "shape",
+              "linealAudioBars",
+              "radialAudioBars",
+              "progressFrame",
+              "progressBar",
+              "rect",
+              "progressSquare"
+            ],
+            "type": "text",
+            "items": ["qQoAOzVldGABroOOSs2JA"],
+            "magnetic": false,
+            "static": false,
+            "muted": false
+          },
+          {
+            "id": "qAsUmM1LLCvQ6-dF2ab1v",
+            "accepts": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "composition",
+              "caption",
+              "template",
+              "customTrack",
+              "customTrack2",
+              "illustration",
+              "custom",
+              "main",
+              "shape",
+              "linealAudioBars",
+              "radialAudioBars",
+              "progressFrame",
+              "progressBar",
+              "rect",
+              "progressSquare"
+            ],
+            "type": "text",
+            "items": ["vA7TvGmNaSFNm"],
+            "magnetic": false,
+            "static": false,
+            "muted": false
+          },
+          {
+            "id": "bnb4h5c-oOPGFsGOFVzFm",
+            "accepts": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "composition",
+              "caption",
+              "template",
+              "customTrack",
+              "customTrack2",
+              "illustration",
+              "custom",
+              "main",
+              "shape",
+              "linealAudioBars",
+              "radialAudioBars",
+              "progressFrame",
+              "progressBar",
+              "rect",
+              "progressSquare"
+            ],
+            "type": "text",
+            "items": ["twW4ST1dtO6RsYcN"],
+            "magnetic": false,
+            "static": false,
+            "muted": false
+          },
+          {
+            "id": "jzx09gJWgQterosCCH0Fj",
+            "accepts": [
+              "text",
+              "image",
+              "video",
+              "audio",
+              "composition",
+              "caption",
+              "template",
+              "customTrack",
+              "customTrack2",
+              "illustration",
+              "custom",
+              "main",
+              "shape",
+              "linealAudioBars",
+              "radialAudioBars",
+              "progressFrame",
+              "progressBar",
+              "rect",
+              "progressSquare"
+            ],
+            "type": "text",
+            "items": ["SPCtFT1by5MwBSk"],
+            "magnetic": false,
+            "static": false,
+            "muted": false
+          },
+          {
+            "id": "xVgHvSp_vBG_XGElVSWjJ",
             "accepts": [
               "text",
               "image",
@@ -140,39 +254,40 @@
               "progressSquare"
             ],
             "type": "video",
-            "items": [
-              "PYguwrqVFc4VsAPn",
-              "L7Qzn0gBqiwV1LTE",
-              "OsJfNBDmgi2DZ19c",
-              "Dmdl840esqxUthB0",
-              "Az9RWUqjLHDtmLY"
-            ],
+            "items": ["rzDOCnaaNHBYaWpQ", "vf038POLYjvc2lof"],
             "magnetic": false,
             "static": false,
             "muted": false
           }
         ],
         "trackItemsMap": {
-          "Dmdl840esqxUthB0": {
-            "id": "Dmdl840esqxUthB0",
+          "vf038POLYjvc2lof": {
+            "id": "vf038POLYjvc2lof",
+            "type": "image",
+            "name": "image",
+            "display": {
+              "from": 6303.191489361702,
+              "to": 11303.191489361703
+            },
+            "playbackRate": 1,
             "details": {
-              "width": 2160,
-              "height": 4096,
+              "src": "./media/691c6d686ad325a3e62e7e75/cb9dce9e7768404594017b122d2d9a6c_upload.jpg",
+              "width": 7952,
+              "height": 5304,
               "opacity": 100,
-              "src": "./media/695de5db61e32ffac0d26487/be648ac6ebd44d3db6cf989a320d7953_upload.mp4",
-              "volume": 100,
+              "transform": "scale(0.250012, 0.250012)",
+              "border": "none",
               "borderRadius": 0,
-              "borderWidth": 0,
-              "borderColor": "#000000",
               "boxShadow": {
                 "color": "#000000",
                 "x": 0,
                 "y": 0,
                 "blur": 0
               },
-              "top": "-1088px",
-              "left": "-540px",
-              "transform": "scale(0.46875)",
+              "top": -2104.91,
+              "left": -3026.63,
+              "borderWidth": 0,
+              "borderColor": "#000000",
               "blur": 0,
               "brightness": 100,
               "flipX": false,
@@ -181,29 +296,22 @@
               "visibility": "visible"
             },
             "metadata": {
-              "previewUrl": "https://cdn.designcombo.dev/caption_previews/static_preset1.webp"
+              "isCustomerField": true,
+              "isLocked": false,
+              "dataType": "image",
+              "fieldPath": "background_image",
+              "fieldLabel": "Background Image",
+              "defaultValue": "Background Image"
             },
-            "trim": {
-              "from": 0,
-              "to": 7360
-            },
-            "type": "video",
-            "name": "video",
-            "playbackRate": 1,
-            "display": {
-              "from": 9281.91489361702,
-              "to": 16641.91489361702
-            },
-            "duration": 7360,
             "isMain": false
           },
-          "L7Qzn0gBqiwV1LTE": {
-            "id": "L7Qzn0gBqiwV1LTE",
+          "rzDOCnaaNHBYaWpQ": {
+            "id": "rzDOCnaaNHBYaWpQ",
             "details": {
-              "width": 2160,
-              "height": 3840,
+              "width": 3840,
+              "height": 2160,
               "opacity": 100,
-              "src": "./media/695de5db61e32ffac0d26487/a303f2c30ede489882136a7f065d9400_upload.mp4",
+              "src": "./media/691c6d686ad325a3e62e7e75/12eab0dd3aa84b88b24b34893b1a0d2b_upload.mp4",
               "volume": 100,
               "borderRadius": 0,
               "borderWidth": 0,
@@ -214,8 +322,8 @@
                 "y": 0,
                 "blur": 0
               },
-              "top": "-960px",
-              "left": "-540px",
+              "top": "-545.791px",
+              "left": "-955.3px",
               "transform": "scale(0.5)",
               "blur": 0,
               "brightness": 100,
@@ -225,262 +333,51 @@
               "visibility": "visible"
             },
             "metadata": {
-              "previewUrl": "https://cdn.designcombo.dev/caption_previews/static_preset1.webp"
+              "previewUrl": "https://cdn.designcombo.dev/caption_previews/static_preset1.webp",
+              "isCustomerField": true,
+              "isLocked": false,
+              "dataType": "video",
+              "fieldPath": "background_video",
+              "fieldLabel": "Background Video",
+              "defaultValue": "Background Video"
             },
             "trim": {
               "from": 0,
-              "to": 3643.6170212766006
+              "to": 6303.191489361706
             },
             "type": "video",
             "name": "video",
             "playbackRate": 1,
             "display": {
-              "from": 2287.234042553193,
-              "to": 5930.8510638297885
-            },
-            "duration": 7840,
-            "isMain": false
-          },
-          "PYguwrqVFc4VsAPn": {
-            "id": "PYguwrqVFc4VsAPn",
-            "type": "image",
-            "name": "image",
-            "display": {
               "from": 0,
-              "to": 2287.234042553193
+              "to": 6303.191489361706
             },
-            "playbackRate": 1,
-            "details": {
-              "src": "./media/695de5db61e32ffac0d26487/7dd9c5981b864c59aeb3c6a5aa1d658a_upload.jpg",
-              "width": 4000,
-              "height": 6000,
-              "opacity": 100,
-              "transform": "scale(0.334695, 0.334695)",
-              "border": "none",
-              "borderRadius": 0,
-              "boxShadow": {
-                "color": "#000000",
-                "x": 0,
-                "y": 0,
-                "blur": 0
-              },
-              "top": -2042.54,
-              "left": -1458.3,
-              "borderWidth": 0,
-              "borderColor": "#000000",
-              "blur": 0,
-              "brightness": 100,
-              "flipX": false,
-              "flipY": false,
-              "rotate": "0deg",
-              "visibility": "visible"
-            },
-            "metadata": {
-              "isCustomerField": true,
-              "isLocked": false,
-              "dataType": "image",
-              "fieldPath": "background_image",
-              "fieldLabel": "Background Image",
-              "defaultValue": "Background Image"
-            },
+            "duration": 12560,
             "isMain": false
           },
-          "Az9RWUqjLHDtmLY": {
-            "id": "Az9RWUqjLHDtmLY",
-            "type": "image",
-            "name": "image",
-            "display": {
-              "from": 16641.91489361702,
-              "to": 21641.91489361702
-            },
-            "playbackRate": 1,
-            "details": {
-              "src": "./media/695de5db61e32ffac0d26487/05bf34680b2645ea938cff350f6aadbe_upload.jpg",
-              "width": 4882,
-              "height": 6102,
-              "opacity": 100,
-              "transform": "scale(0.22122081114297418)",
-              "border": "none",
-              "borderRadius": 0,
-              "boxShadow": {
-                "color": "#000000",
-                "x": 0,
-                "y": 0,
-                "blur": 0
-              },
-              "top": "-2376.05px",
-              "left": "-1901px",
-              "borderWidth": 0,
-              "borderColor": "#000000",
-              "blur": 0,
-              "brightness": 100,
-              "flipX": false,
-              "flipY": false,
-              "rotate": "0deg",
-              "visibility": "visible"
-            },
-            "metadata": {
-              "isCustomerField": true,
-              "isLocked": false,
-              "dataType": "image",
-              "fieldPath": "background_image",
-              "fieldLabel": "Background Image",
-              "defaultValue": "Background Image"
-            },
-            "isMain": false
-          },
-          "OsJfNBDmgi2DZ19c": {
-            "id": "OsJfNBDmgi2DZ19c",
-            "type": "image",
-            "name": "image",
-            "display": {
-              "from": 5930.8510638297885,
-              "to": 9281.914893617022
-            },
-            "playbackRate": 1,
-            "details": {
-              "src": "./media/695de5db61e32ffac0d26487/a8804a231ec64112aa9faf4c2add0e54_upload.jpg",
-              "width": 3986,
-              "height": 5979,
-              "opacity": 100,
-              "transform": "scale(0.33347, 0.33347)",
-              "border": "none",
-              "borderRadius": 0,
-              "boxShadow": {
-                "color": "#000000",
-                "x": 0,
-                "y": 0,
-                "blur": 0
-              },
-              "top": -2016.74,
-              "left": -1456.15,
-              "borderWidth": 0,
-              "borderColor": "#000000",
-              "blur": 0,
-              "brightness": 100,
-              "flipX": false,
-              "flipY": false,
-              "rotate": "0deg",
-              "visibility": "visible"
-            },
-            "metadata": {
-              "isCustomerField": true,
-              "isLocked": false,
-              "dataType": "image",
-              "fieldPath": "background_image",
-              "fieldLabel": "Background Image",
-              "defaultValue": "Background Image"
-            },
-            "isMain": false
-          },
-          "btBKARF2eqWQfyFZ": {
-            "id": "btBKARF2eqWQfyFZ",
-            "name": "audio",
-            "type": "audio",
-            "display": {
-              "from": 0,
-              "to": 21641.91489361703
-            },
-            "trim": {
-              "from": 8247.066489361701,
-              "to": 29888.981382978716
-            },
-            "playbackRate": 1,
-            "details": {
-              "src": "./media/695de5db61e32ffac0d26487/66bf67ba21af4d26a358d0008c728290_upload.mp3",
-              "volume": 100
-            },
-            "metadata": {
-              "isCustomerField": true,
-              "isLocked": false,
-              "dataType": "audio",
-              "fieldPath": "background_music",
-              "fieldLabel": "Background Music",
-              "defaultValue": "Background Music"
-            },
-            "duration": 30693.875,
-            "isMain": false
-          },
-          "Y7P5Fvr40_lYNMxnYz4B0": {
-            "id": "Y7P5Fvr40_lYNMxnYz4B0",
-            "name": "text",
-            "type": "text",
-            "display": {
-              "from": 16641.91489361702,
-              "to": 21641.91489361702
-            },
-            "details": {
-              "text": "Heading and some body",
-              "fontSize": 120,
-              "width": 1024,
-              "fontUrl": "https://fonts.gstatic.com/s/bangers/v13/FeVQS0BTqb0h60ACL5la2bxii28.ttf",
-              "fontFamily": "Bangers-Regular",
-              "color": "#000",
-              "wordWrap": "break-word",
-              "textAlign": "center",
-              "borderWidth": 0,
-              "borderColor": "transparent",
-              "boxShadow": {
-                "color": "transparent",
-                "x": 0,
-                "y": 0,
-                "blur": 0
-              },
-              "fontWeight": "normal",
-              "fontStyle": "normal",
-              "textDecoration": "none",
-              "lineHeight": "normal",
-              "letterSpacing": "normal",
-              "wordSpacing": "normal",
-              "backgroundColor": "#ffde00",
-              "border": "none",
-              "textShadow": "none",
-              "opacity": 100,
-              "wordBreak": "normal",
-              "WebkitTextStrokeColor": "#ffffff",
-              "WebkitTextStrokeWidth": "0px",
-              "top": "1438.46px",
-              "left": "31.3043px",
-              "textTransform": "none",
-              "transform": "none",
-              "skewX": 0,
-              "skewY": 0,
-              "height": 127,
-              "borderRadius": 20
-            },
-            "metadata": {
-              "isCustomerField": true,
-              "isLocked": false,
-              "dataType": "text",
-              "fieldPath": "custom_text",
-              "fieldLabel": "Custom Text",
-              "defaultValue": "Heading and some body"
-            },
-            "isMain": false
-          },
-          "J8PtN5ravO6zADtTRvzV-": {
-            "id": "J8PtN5ravO6zADtTRvzV-",
+          "SPCtFT1by5MwBSk": {
+            "id": "SPCtFT1by5MwBSk",
             "name": "text",
             "type": "text",
             "display": {
               "from": 0,
-              "to": 21641.914893617024
+              "to": 7053.191489361705
             },
             "details": {
-              "text": "Heading and some body",
-              "fontSize": 120,
+              "text": "{{customer.customer_company_name}}",
+              "fontSize": 40,
               "width": 600,
               "fontUrl": "https://fonts.gstatic.com/s/roboto/v29/KFOlCnqEu92Fr1MmWUlvAx05IsDqlA.ttf",
               "fontFamily": "Roboto-Bold",
-              "color": "#fff",
+              "color": "#f5be36",
               "wordWrap": "break-word",
-              "textAlign": "center",
-              "borderWidth": 12,
-              "borderColor": "#000",
+              "textAlign": "left",
+              "borderWidth": 0,
+              "borderColor": "transparent",
               "boxShadow": {
-                "color": "#000",
-                "x": -12,
-                "y": 12,
+                "color": "#b12019",
+                "x": 8,
+                "y": 8,
                 "blur": 0
               },
               "fontWeight": "normal",
@@ -496,14 +393,322 @@
               "wordBreak": "normal",
               "WebkitTextStrokeColor": "#ffffff",
               "WebkitTextStrokeWidth": "0px",
-              "top": "241.7px",
-              "left": "212.174px",
+              "top": "928px",
+              "left": "1282.52px",
               "textTransform": "none",
               "transform": "none",
               "skewX": 0,
               "skewY": 0,
-              "height": 434.4,
+              "height": 97.6,
               "borderRadius": 10
+            },
+            "metadata": {
+              "isCustomerField": true,
+              "isLocked": false,
+              "dataType": "text",
+              "fieldPath": "customer.customer_company_name",
+              "fieldLabel": "Customer.Customer Company Name",
+              "defaultValue": "Customer.Customer Company Name"
+            },
+            "isMain": false
+          },
+          "twW4ST1dtO6RsYcN": {
+            "id": "twW4ST1dtO6RsYcN",
+            "name": "text",
+            "type": "text",
+            "display": {
+              "from": 0,
+              "to": 8218.085106382978
+            },
+            "details": {
+              "text": "{{customer.full_name}}",
+              "fontSize": 40,
+              "width": 600,
+              "fontUrl": "https://fonts.gstatic.com/s/roboto/v29/KFOlCnqEu92Fr1MmWUlvAx05IsDqlA.ttf",
+              "fontFamily": "Roboto-Bold",
+              "color": "#000000",
+              "wordWrap": "break-word",
+              "textAlign": "left",
+              "borderWidth": 0,
+              "borderColor": "#000000",
+              "boxShadow": {
+                "color": "#00000000",
+                "x": 0,
+                "y": 0,
+                "blur": 0
+              },
+              "fontWeight": "normal",
+              "fontStyle": "normal",
+              "textDecoration": "none",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "wordSpacing": "normal",
+              "backgroundColor": "transparent",
+              "border": "none",
+              "textShadow": "none",
+              "opacity": 100,
+              "wordBreak": "normal",
+              "WebkitTextStrokeColor": "#ffffff",
+              "WebkitTextStrokeWidth": "0px",
+              "top": "953.6px",
+              "left": "23.002px",
+              "textTransform": "none",
+              "transform": "none",
+              "skewX": 0,
+              "skewY": 0,
+              "height": 48.8
+            },
+            "metadata": {
+              "isCustomerField": true,
+              "isLocked": false,
+              "dataType": "text",
+              "fieldPath": "customer.full_name",
+              "fieldLabel": "Customer.Full Name",
+              "defaultValue": "Customer.Full Name"
+            },
+            "isMain": false
+          },
+          "vA7TvGmNaSFNm": {
+            "id": "vA7TvGmNaSFNm",
+            "name": "text",
+            "type": "text",
+            "display": {
+              "from": 0,
+              "to": 10345.744680851063
+            },
+            "details": {
+              "text": "{{customer.city}}",
+              "fontSize": 40,
+              "width": 600,
+              "fontUrl": "https://fonts.gstatic.com/s/roboto/v29/KFOlCnqEu92Fr1MmWUlvAx05IsDqlA.ttf",
+              "fontFamily": "Roboto-Bold",
+              "color": "#000000",
+              "wordWrap": "break-word",
+              "textAlign": "left",
+              "borderWidth": 0,
+              "borderColor": "#000000",
+              "boxShadow": {
+                "color": "#00000000",
+                "x": 0,
+                "y": 0,
+                "blur": 0
+              },
+              "fontWeight": "normal",
+              "fontStyle": "normal",
+              "textDecoration": "none",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "wordSpacing": "normal",
+              "backgroundColor": "transparent",
+              "border": "none",
+              "textShadow": "none",
+              "opacity": 100,
+              "wordBreak": "normal",
+              "WebkitTextStrokeColor": "#ffffff",
+              "WebkitTextStrokeWidth": "0px",
+              "top": "952.812px",
+              "left": "645.523px",
+              "textTransform": "none",
+              "transform": "none",
+              "skewX": 0,
+              "skewY": 0,
+              "height": 48.8
+            },
+            "metadata": {
+              "isCustomerField": true,
+              "isLocked": false,
+              "dataType": "text",
+              "fieldPath": "customer.city",
+              "fieldLabel": "Customer.City",
+              "defaultValue": "Customer.City"
+            },
+            "isMain": false
+          },
+          "qQoAOzVldGABroOOSs2JA": {
+            "id": "qQoAOzVldGABroOOSs2JA",
+            "name": "text",
+            "type": "text",
+            "display": {
+              "from": 0,
+              "to": 7500.000000000004
+            },
+            "details": {
+              "text": "Heading and some body",
+              "fontSize": 120,
+              "width": 1735,
+              "fontUrl": "https://fonts.gstatic.com/s/bangers/v13/FeVQS0BTqb0h60ACL5la2bxii28.ttf",
+              "fontFamily": "Bangers-Regular",
+              "color": "#000000",
+              "wordWrap": "break-word",
+              "textAlign": "center",
+              "borderWidth": 0,
+              "borderColor": "#000000",
+              "boxShadow": {
+                "color": "#ffffff",
+                "x": 0,
+                "y": 0,
+                "blur": 0
+              },
+              "fontWeight": "normal",
+              "fontStyle": "normal",
+              "textDecoration": "none",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "wordSpacing": "normal",
+              "backgroundColor": "transparent",
+              "border": "none",
+              "textShadow": "none",
+              "opacity": 100,
+              "wordBreak": "normal",
+              "WebkitTextStrokeColor": "#ffffff",
+              "WebkitTextStrokeWidth": "0px",
+              "top": "73.7917px",
+              "left": "124.343px",
+              "textTransform": "none",
+              "transform": "none",
+              "skewX": 0,
+              "skewY": 0,
+              "height": 145
+            },
+            "metadata": {
+              "isCustomerField": true,
+              "isLocked": false,
+              "dataType": "text",
+              "fieldPath": "custom_text",
+              "fieldLabel": "Custom Text",
+              "defaultValue": "Heading and some body"
+            },
+            "isMain": false
+          },
+          "UQoIJ4-BgwGQ_BKaoNbPx": {
+            "id": "UQoIJ4-BgwGQ_BKaoNbPx",
+            "name": "text",
+            "type": "text",
+            "display": {
+              "from": 0,
+              "to": 8218.085106382978
+            },
+            "details": {
+              "text": "\nLorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book. \n",
+              "fontSize": 40,
+              "width": 1837,
+              "fontUrl": "https://fonts.gstatic.com/s/chivo/v12/va9I4kzIxd1KFoBvS-J3kbDP.ttf",
+              "fontFamily": "Chivo-Regular",
+              "color": "#000000",
+              "wordWrap": "break-word",
+              "textAlign": "center",
+              "borderWidth": 0,
+              "borderColor": "#000000",
+              "boxShadow": {
+                "color": "#ffffff",
+                "x": 0,
+                "y": 0,
+                "blur": 0
+              },
+              "fontWeight": "normal",
+              "fontStyle": "normal",
+              "textDecoration": "none",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "wordSpacing": "normal",
+              "backgroundColor": "transparent",
+              "border": "none",
+              "textShadow": "none",
+              "opacity": 100,
+              "wordBreak": "normal",
+              "WebkitTextStrokeColor": "#ffffff",
+              "WebkitTextStrokeWidth": "0px",
+              "top": "382.98px",
+              "left": "46.684px",
+              "textTransform": "none",
+              "transform": "none",
+              "skewX": 0,
+              "skewY": 0,
+              "height": 219
+            },
+            "metadata": {
+              "isCustomerField": true,
+              "isLocked": false,
+              "dataType": "text",
+              "fieldPath": "custom_text",
+              "fieldLabel": "Custom Text",
+              "defaultValue": "Heading and some body"
+            },
+            "isMain": false
+          },
+          "Qjfq66ilwzDe4q78": {
+            "id": "Qjfq66ilwzDe4q78",
+            "name": "audio",
+            "type": "audio",
+            "display": {
+              "from": 0,
+              "to": 11250
+            },
+            "trim": {
+              "from": 0,
+              "to": 11250
+            },
+            "playbackRate": 1,
+            "details": {
+              "src": "./media/691c6d686ad325a3e62e7e75/aec2ad42467940b3a82b0d4995ff610a_upload.mp3",
+              "volume": 100
+            },
+            "metadata": {
+              "isCustomerField": true,
+              "isLocked": false,
+              "dataType": "audio",
+              "fieldPath": "background_music",
+              "fieldLabel": "Background Music",
+              "defaultValue": "Background Music"
+            },
+            "duration": 18703.656,
+            "isMain": false
+          },
+          "7ucM_xEtXzUlwRIw1f50B": {
+            "id": "7ucM_xEtXzUlwRIw1f50B",
+            "name": "text",
+            "type": "text",
+            "display": {
+              "from": 0,
+              "to": 5000
+            },
+            "details": {
+              "text": "Heading and some body",
+              "fontSize": 40,
+              "width": 1706,
+              "fontUrl": "https://fonts.gstatic.com/s/bebasneue/v2/JTUSjIg69CK48gW7PXooxW5rygbi49c.ttf",
+              "fontFamily": "BebasNeue-Regular",
+              "color": "#000000",
+              "wordWrap": "break-word",
+              "textAlign": "center",
+              "borderWidth": 0,
+              "borderColor": "#000000",
+              "boxShadow": {
+                "color": "#ffffff",
+                "x": 0,
+                "y": 0,
+                "blur": 0
+              },
+              "fontWeight": "normal",
+              "fontStyle": "normal",
+              "textDecoration": "none",
+              "lineHeight": "normal",
+              "letterSpacing": "normal",
+              "wordSpacing": "normal",
+              "backgroundColor": "transparent",
+              "border": "none",
+              "textShadow": "none",
+              "opacity": 100,
+              "wordBreak": "normal",
+              "WebkitTextStrokeColor": "#ffffff",
+              "WebkitTextStrokeWidth": "0px",
+              "top": "670.253px",
+              "left": "63.5382px",
+              "textTransform": "none",
+              "transform": "none",
+              "skewX": 0,
+              "skewY": 0,
+              "height": 67
             },
             "metadata": {
               "isCustomerField": true,
@@ -517,60 +722,29 @@
           }
         },
         "trackItemIds": [
-          "OsJfNBDmgi2DZ19c",
-          "Az9RWUqjLHDtmLY",
-          "PYguwrqVFc4VsAPn",
-          "L7Qzn0gBqiwV1LTE",
-          "Dmdl840esqxUthB0",
-          "btBKARF2eqWQfyFZ",
-          "Y7P5Fvr40_lYNMxnYz4B0",
-          "J8PtN5ravO6zADtTRvzV-"
+          "vf038POLYjvc2lof",
+          "rzDOCnaaNHBYaWpQ",
+          "SPCtFT1by5MwBSk",
+          "twW4ST1dtO6RsYcN",
+          "vA7TvGmNaSFNm",
+          "qQoAOzVldGABroOOSs2JA",
+          "UQoIJ4-BgwGQ_BKaoNbPx",
+          "Qjfq66ilwzDe4q78",
+          "7ucM_xEtXzUlwRIw1f50B"
         ],
         "transitionsMap": {
-          "PYguwrqVFc4VsAPn-L7Qzn0gBqiwV1LTE": {
-            "id": "PYguwrqVFc4VsAPn-L7Qzn0gBqiwV1LTE",
+          "rzDOCnaaNHBYaWpQ-vf038POLYjvc2lof": {
+            "id": "rzDOCnaaNHBYaWpQ-vf038POLYjvc2lof",
             "duration": 1500,
-            "fromId": "PYguwrqVFc4VsAPn",
-            "toId": "L7Qzn0gBqiwV1LTE",
+            "fromId": "rzDOCnaaNHBYaWpQ",
+            "toId": "vf038POLYjvc2lof",
             "kind": "none",
-            "trackId": "86BMmbWfUoa5CRVIKulma",
-            "type": "transition"
-          },
-          "L7Qzn0gBqiwV1LTE-OsJfNBDmgi2DZ19c": {
-            "id": "L7Qzn0gBqiwV1LTE-OsJfNBDmgi2DZ19c",
-            "duration": 1500,
-            "fromId": "L7Qzn0gBqiwV1LTE",
-            "toId": "OsJfNBDmgi2DZ19c",
-            "kind": "none",
-            "trackId": "86BMmbWfUoa5CRVIKulma",
-            "type": "transition"
-          },
-          "OsJfNBDmgi2DZ19c-Dmdl840esqxUthB0": {
-            "id": "OsJfNBDmgi2DZ19c-Dmdl840esqxUthB0",
-            "duration": 1500,
-            "fromId": "OsJfNBDmgi2DZ19c",
-            "toId": "Dmdl840esqxUthB0",
-            "kind": "none",
-            "trackId": "86BMmbWfUoa5CRVIKulma",
-            "type": "transition"
-          },
-          "Dmdl840esqxUthB0-Az9RWUqjLHDtmLY": {
-            "id": "Dmdl840esqxUthB0-Az9RWUqjLHDtmLY",
-            "duration": 1500,
-            "fromId": "Dmdl840esqxUthB0",
-            "toId": "Az9RWUqjLHDtmLY",
-            "kind": "none",
-            "trackId": "86BMmbWfUoa5CRVIKulma",
+            "trackId": "xVgHvSp_vBG_XGElVSWjJ",
             "type": "transition"
           }
         },
-        "transitionIds": [
-          "PYguwrqVFc4VsAPn-L7Qzn0gBqiwV1LTE",
-          "L7Qzn0gBqiwV1LTE-OsJfNBDmgi2DZ19c",
-          "OsJfNBDmgi2DZ19c-Dmdl840esqxUthB0",
-          "Dmdl840esqxUthB0-Az9RWUqjLHDtmLY"
-        ],
-        "backgroundColor": "#000000"
+        "transitionIds": ["rzDOCnaaNHBYaWpQ-vf038POLYjvc2lof"],
+        "backgroundColor": "transparent"
       },
       "options": {
         "fps": 30,
@@ -579,8 +753,8 @@
     },
     "type": "video",
     "status": "active",
-    "created_at": "2026-01-29T07:44:19.794000",
-    "updated_at": "2026-01-29T07:44:19.794000",
-    "id": "697b0fd336082cb80e75e390"
+    "created_at": "2026-02-15T08:13:25.544000",
+    "updated_at": "2026-02-15T09:18:43.564000",
+    "id": "69918025b6ecb020c0daca41"
   }
 ]

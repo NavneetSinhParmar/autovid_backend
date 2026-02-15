@@ -306,34 +306,30 @@ def compute_line_spacing(line_height, font_size):
     """
     Calculate line spacing based on line-height value.
     Handles: 'normal', '24px', '1.5', 1.2, etc.
-    Returns: spacing value in pixels (can be negative for tight spacing)
+    Returns: spacing in pixels between lines. Use 0 for "normal" to avoid extra gap.
     """
     if line_height in (None, "", "normal"):
-        # Browser default 'normal' is typically 1.2em
-        return int(font_size * 1.2 - font_size)  # Returns spacing between lines
-    
+        return 0
+
     try:
         if isinstance(line_height, str):
-            # Remove 'px' if present
             line_height = line_height.strip().lower()
             if line_height.endswith("px"):
                 px_val = float(line_height.replace("px", ""))
-                return int(px_val - font_size)  # Return spacing (total height - font_size)
+                return max(0, int(round(px_val - font_size)))
             elif line_height == "normal":
-                return int(font_size * 0.2)  # 1.2em - 1em = 0.2em spacing
-        
-        # Handle numeric values (em-based or unitless)
+                return 0
+
         val = float(line_height)
-        if val < 1:  # Too small, probably invalid
-            return int(font_size * 0.2)
-        elif val < 3:  # Likely em-based (1.2, 1.5, etc.)
-            return int(font_size * val - font_size)
-        else:  # Pixel value
-            return int(val - font_size)
-            
+        if val < 1:
+            return 0
+        elif val < 3:  # em-based (1.2, 1.5)
+            return max(0, int(round(font_size * (val - 1.0))))
+        else:
+            return max(0, int(round(val - font_size)))
+
     except Exception:
-        # Fallback to reasonable default
-        return int(font_size * 0.2)
+        return 0
 
 def wrap_text(
     text,
@@ -346,22 +342,23 @@ def wrap_text(
 ):
     if not text or font_size <= 0:
         return text
-    
+
+    text = text.strip()
+    if not text:
+        return text
+
     if max_width is None:
         max_width = 0
 
-    # FIX: Ensure canvas_width is properly handled
     if max_width and max_width > 0:
         effective_width = max_width
     else:
-        # Fallback ONLY when width is missing
-        # FIX: Ensure canvas_width is not None
-        # canvas_width_val = canvas_width or 1920  # Default if None
         effective_width = int((canvas_width or 1920) * 0.7)
 
+    # Conservative estimate: proportional fonts ~0.52 font_size per char (avoids overflow)
     avg_char = max(
         1.0,
-        (font_size * 0.6) + max(0.0, letter_spacing * 0.5)
+        (font_size * 0.52) + max(0.0, letter_spacing)
     )
 
     max_chars = max(1, int(effective_width / avg_char))
@@ -447,44 +444,40 @@ def smart_logo_mapping(src: str, size: str = None) -> str:
 def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, context, canvas_w=None, canvas_h=None):
     details = item.get("details", {})
     display = item.get("display", {})
-    
     start = display.get("from", 0) / 1000
     end = display.get("to", duration * 1000) / 1000
-    
+
     scale_val = parse_scale(details.get("transform", "scale(1)"))
     raw_text = item.get("details", {}).get("text", "")
 
     if context and isinstance(context, dict):
         raw_text = replace_placeholders(raw_text, context)
     print("TEXT AFTER REPLACE:", raw_text)
+
     font_size = int(details.get("fontSize", 40) * scale_val)
     font_size = min(font_size, 200)  # Limit to 200px maximum
     opacity = float(details.get("opacity", 100)) / 100.0
     letter_spacing = parse_px(details.get("letterSpacing", 0)) if details.get("letterSpacing") not in (None, "normal") else 0.0
     letter_spacing = letter_spacing * scale_val
     line_spacing = compute_line_spacing(details.get("lineHeight", "normal"), font_size)
-    
-    # FIX: Properly initialize max_width with proper scoping
+
+    # --- REMOVED EARLY ALIGN BLOCK (caused NameError) ---
+
+    # Parse width for wrapping and box
     raw_width = details.get("width")
-    max_width = 0  # Initialize first
-    
+    max_width = 0
     try:
         if raw_width not in (None, "", 0, "0", "0px"):
             max_width = float(parse_px(raw_width)) * scale_val
     except Exception as e:
         print(f"Warning: Could not parse width '{raw_width}': {e}")
         max_width = 0.0
-    # Don't multiply again - that was causing the issue
-    # if max_width:
-    #     max_width = max_width * scale_val  # REMOVE THIS LINE
-    
+
     word_wrap = details.get("wordWrap", "normal")
     word_break = details.get("wordBreak", "normal")
 
-      # DEBUG: Print values to see what's happening
     print(f"DEBUG: raw_text={raw_text[:50] if raw_text else ''}, max_width={max_width}, font_size={font_size}")
-    
-    # Now max_width is properly initialized
+
     wrapped_text = wrap_text(
         raw_text,
         max_width,
@@ -492,51 +485,49 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
         letter_spacing,
         word_wrap,
         word_break,
-        canvas_width=canvas_w,  # Use canvas_w parameter
+        canvas_width=canvas_w,
     )
-    
+
     textfile_path = ""
     try:
         textfile_path = write_text_temp(wrapped_text)
     except Exception:
         textfile_path = ""
-    
+
     text = ffmpeg_escape_text(wrapped_text)
-    
+
+    # Use exact left/top from JSON
     left = parse_px(details.get("left", 0))
     top = parse_px(details.get("top", 0))
-    text_box_w = parse_px(details.get("width", 0)) * scale_val if details.get("width") else 0
-    text_box_h = parse_px(details.get("height", 0)) * scale_val if details.get("height") else 0
-    
-    if text_box_w:
-        left = left + (parse_px(details.get("width", 0)) - text_box_w) / 2
-    if text_box_h:
-        top = top + (parse_px(details.get("height", 0)) - text_box_h) / 2
-    
+
+    # --- CORRECT ALIGNMENT LOGIC (now with defined variables) ---
     align = str(details.get("textAlign", "left")).lower()
-    
-    if max_width > 0 and align in ("center", "right"):
-        if align == "center":
-            x_expr = f"{left}+({max_width}-text_w)/2"
-        else:
-            x_expr = f"{left}+{max_width}-text_w"
+
+    box_w = max_width if max_width > 0 else (float(canvas_w or 1920) - left)
+  
+
+    if align == "center":
+        x_expr = f"{left}+({box_w}-text_w)/2"
+    elif align == "right" and box_w > 0:
+        x_expr = f"{left}+{box_w}-text_w"
     else:
-        x_expr = f"{left}"  
-    
-    if text_box_h:
-        y_expr = f"{top} + ({text_box_h} - text_h)/2"
-    else:
-        y_expr = f"{top}"
-    
+        x_expr = f"{left}"
+
+    print(f"DEBUG - left={left}, box_w={box_w}, canvas_w={canvas_w}")
+    print(f"DEBUG - x_expr before substitution: {x_expr}")
+
+    # Always use exact top
+    y_expr = f"{top}"
+
     font_path = resolve_font_file(details)
     text_color = ffmpeg_color(parse_color(details.get("color", "#ffffff")), opacity)
     bg_color = parse_color(details.get("backgroundColor", "transparent"))
     bg_color_str = ffmpeg_color(bg_color, opacity)
-    
+
     text_source = f"text='{text}'"
     if textfile_path:
         text_source = f"textfile='{ffmpeg_escape_path(textfile_path)}'"
-    
+
     base_params = [
         f"fontfile='{ffmpeg_escape_path(font_path)}'",
         text_source,
@@ -546,30 +537,35 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
         f"fontcolor={text_color}",
         "fix_bounds=1"
     ]
-    
+
+    # Add proper multiline alignment
+    if align == "center":
+        base_params.append("text_align=center")
+    elif align == "right":
+        base_params.append("text_align=right")
+    else:
+        base_params.append("text_align=left")
+
     if letter_spacing:
         base_params.append(f"letter_spacing={int(letter_spacing)}")
-    
-    if line_spacing is not None:
+    if line_spacing > 0:
         base_params.append(f"line_spacing={int(line_spacing)}")
-    
     if bg_color[3] > 0:
         base_params.append("box=1")
         base_params.append(f"boxcolor={bg_color_str}")
-    
     border_width = details.get("borderWidth", 0)
     border_color = details.get("borderColor", "transparent")
     if border_width and border_color and border_color != "transparent":
         base_params.append(f"borderw={int(border_width)}")
         base_params.append(f"bordercolor={ffmpeg_color(parse_color(border_color), opacity)}")
-    
+
     shadows = []
     text_shadow = parse_shadow_string(details.get("textShadow", "none"))
     if text_shadow:
         text_shadow["x"] = text_shadow.get("x", 0) * scale_val
         text_shadow["y"] = text_shadow.get("y", 0) * scale_val
         shadows.append(text_shadow)
-    
+
     box_shadow = details.get("boxShadow")
     if isinstance(box_shadow, dict):
         shadow_color = box_shadow.get("color", "#000000")
@@ -581,7 +577,7 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
                 "y": shadow_y,
                 "color": shadow_color,
             })
-    
+
     current_label = last_label
     for s_idx, shadow in enumerate(shadows):
         shadow_x = shadow.get("x", 0) if shadow else 0
@@ -596,24 +592,21 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
             f"fontsize={font_size}",
             f"fontcolor={shadow_color}",
         ]
-        
         if letter_spacing:
             shadow_params.append(f"letter_spacing={int(letter_spacing)}")
-        if line_spacing is not None:
+        if line_spacing is not None and line_spacing > 0:
             shadow_params.append(f"line_spacing={int(line_spacing)}")
-        
         filter_parts.append(
             f"{current_label}drawtext={':'.join(shadow_params)}:enable='between(t,{start},{end})'{shadow_label}"
         )
         current_label = shadow_label
-    
+
     out_label = f"[out_txt{text_idx}]"
     filter_parts.append(
         f"{current_label}drawtext={':'.join(base_params)}:enable='between(t,{start},{end})'{out_label}"
     )
-    
-    return out_label, text_idx + 1
 
+    return out_label, text_idx + 1
 # ---------------------------------------------------------
 # MAIN RENDER FUNCTION
 # ---------------------------------------------------------
@@ -761,167 +754,6 @@ def safe_float(val):
         return float(clean_val)
     except (ValueError, IndexError):
         return 0.0
-
-
-# def render_preview(template_json, customer, output_path):
-#     design = template_json.get("design", {})
-#     track_items_map = design.get("trackItemsMap", {})
-#     tracks = design.get("tracks", [])
-#     duration = float(template_json.get("duration", 10))
-#     canvas_w, canvas_h = resolve_canvas_size(design)
-#     fps = resolve_fps(design)
-    
-#     filter_parts = []
-#     visual_inputs = [] 
-#     audio_inputs = []  
-    
-#     # 1. Base Layer (Background Canvas)
-#     filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]")
-#     last_label = "[base]"
-
-#     # 2. SEPARATE INPUTS (Videos, Images, Audio) with stable order
-#     track_item_ids = design.get("trackItemIds", [])
-#     ordered_visual_ids = [tid for tid in track_item_ids if track_items_map.get(tid, {}).get("type") in ["video", "image"]]
-
-#     if ordered_visual_ids:
-#         for item_id in ordered_visual_ids:
-#             item = track_items_map.get(item_id, {})
-#             details = item.get("details", {})
-#             src = details.get("src", "")
-#             # src_got = details.get("src", "")
-#             # src = replace_placeholders(details["src"], customer)
-#             if not src:
-#                 continue
-#             abs_src = normalize_media_src(src)
-#             if not abs_src.startswith("http"):
-#                 ensure_file_exists(abs_src)
-#             visual_inputs.append({"src": abs_src, "item": item, "media_type": item.get("type")})
-#     else:
-#         for track in tracks:
-#             itype = track.get("type")
-#             for item_id in track.get("items", []):
-#                 item = track_items_map.get(item_id, {})
-#                 details = item.get("details", {})
-#                 src = details.get("src", "")
-#                 if not src:
-#                     continue
-#                 if itype in ["video", "image"] or item.get("type") in ["video", "image"]:
-#                     abs_src = normalize_media_src(src)
-#                     if not abs_src.startswith("http"):
-#                         ensure_file_exists(abs_src)
-#                     media_type = item.get("type") or itype
-#                     visual_inputs.append({"src": abs_src, "item": item, "media_type": media_type})
-#                 elif itype == "audio":
-#                     abs_src = normalize_media_src(src)
-#                     if not abs_src.startswith("http"):
-#                         ensure_file_exists(abs_src)
-#                     audio_inputs.append({"src": abs_src, "item": item})
-
-#     if tracks:
-#         for track in tracks:
-#             if track.get("type") == "audio":
-#                 for item_id in track.get("items", []):
-#                     item = track_items_map.get(item_id, {})
-#                     details = item.get("details", {})
-#                     src = details.get("src", "")
-#                     if not src:
-#                         continue
-#                     abs_src = normalize_media_src(src)
-#                     if not abs_src.startswith("http"):
-#                         ensure_file_exists(abs_src)
-#                     audio_inputs.append({"src": abs_src, "item": item})
-
-#     # 3. BUILD VISUAL FILTERS (Videos & Images)
-#     for idx, data in enumerate(visual_inputs):
-#         item, details = data["item"], data["item"].get("details", {})
-#         display = item.get("display", {})
-#         start, end = display.get("from", 0)/1000, display.get("to", duration*1000)/1000
-        
-#         # Scale handling (fix comma error)
-#         scale_val = parse_scale(details.get("transform", "scale(1)"))
-
-#         # Scaling and Positioning (center-origin scaling like editor)
-#         orig_w = safe_float(details.get("width", canvas_w))
-#         orig_h = safe_float(details.get("height", canvas_h))
-#         tw = to_even(orig_w * scale_val)
-#         th = to_even(orig_h * scale_val)
-#         left = safe_float(details.get("left", 0))
-#         top = safe_float(details.get("top", 0))
-#         left = left + (orig_w - tw) / 2
-#         top = top + (orig_h - th) / 2
-
-#         scaled, overlaid = f"sc{idx}", f"ov{idx}"
-#         filter_parts.append(f"[{idx}:v]scale={tw}:{th},setpts=PTS-STARTPTS+{start}/TB[{scaled}]")
-#         filter_parts.append(f"{last_label}[{scaled}]overlay={left}:{top}:enable='between(t,{start},{end})'[{overlaid}]")
-#         last_label = f"[{overlaid}]"
-
-#     # 4. HANDLE TEXT (Dynamic JSON Styles)
-#     txt_idx = 0
-#     for track in tracks:
-#         if track.get("type") == "text":
-#             for item_id in track.get("items", []):
-#                 item = track_items_map.get(item_id, {})
-#                 print("caling add to text func")
-#                 last_label, txt_idx = add_text_item_filters(
-#                     filter_parts,
-#                     last_label,
-#                     item,
-#                     duration,
-#                     txt_idx,
-#                     customer,
-#                     canvas_w=canvas_w,  # Add canvas dimensions
-#                     canvas_h=canvas_h,
-#                 )
-
-#     # 5. AUDIO MIXING
-#     audio_mix_filter = ""
-#     audio_sources = []
-#     for i, v in enumerate(visual_inputs):
-#         if (v.get("media_type") or "").lower() == "video":
-#             display = v["item"].get("display", {})
-#             a_start = int(display.get("from", 0))
-#             vol = safe_float(v["item"].get("details", {}).get("volume", 100)) / 100.0
-#             audio_sources.append({"index": i, "start_ms": a_start, "volume": vol})
-#     for i, a in enumerate(audio_inputs):
-#         idx = len(visual_inputs) + i
-#         a_start = int(a["item"].get("display", {}).get("from", 0))
-#         vol = safe_float(a["item"].get("details", {}).get("volume", 100)) / 100.0
-#         audio_sources.append({"index": idx, "start_ms": a_start, "volume": vol})
-
-#     if audio_sources:
-#         a_labels = ""
-#         for i, src in enumerate(audio_sources):
-#             a_start = max(0, int(src["start_ms"]))
-#             volume = src["volume"]
-#             vol_filter = f",volume={volume:.3f}" if volume != 1.0 else ""
-#             a_labels += f"[{src['index']}:a]adelay={a_start}|{a_start}{vol_filter},aresample=async=1:first_pts=0[aud{i}];"
-#         audio_mix_filter = (
-#             f"{a_labels}" + "".join([f"[aud{i}]" for i in range(len(audio_sources))]) +
-#             f"amix=inputs={len(audio_sources)}:normalize=0[outa]"
-#         )
-
-#     # 6. EXECUTION
-#     cmd = ["ffmpeg", "-y"]
-#     for v in visual_inputs:
-#         if (v.get("media_type") or "").lower() == "image":
-#             cmd += ["-loop", "1", "-t", str(duration), "-i", v["src"]]
-#         else:
-#             cmd += ["-i", v["src"]]
-#     for a in audio_inputs:
-#         cmd += ["-i", a["src"]]
-
-#     full_filter = ";".join(filter_parts)
-#     if audio_mix_filter:
-#         full_filter += ";" + audio_mix_filter
-#         cmd += ["-filter_complex", full_filter, "-map", last_label, "-map", "[outa]"]
-#     else:
-#         cmd += ["-filter_complex", full_filter, "-map", last_label]
-
-#     if audio_mix_filter:
-#         cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps), "-c:a", "aac", "-t", str(duration), output_path]
-#     else:
-#         cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(fps), "-an", "-t", str(duration), output_path]
-#     subprocess.run(cmd, check=True)
     
 def render_image_preview(template_json, customer, company, output_path):
     design = template_json["design"]
@@ -1112,6 +944,26 @@ def render_preview(template_json, context_data=None, output_path=None):
                 "item": item,
                 "media_type": item_type
             })
+
+        # Collect audio from trackItemIds (MP3 etc.) - same order as design
+        for item_id in track_item_ids:
+            item = track_items_map.get(item_id, {})
+            if item.get("type") != "audio":
+                continue
+            details = item.get("details", {})
+            src_got = details.get("src", "")
+            src = replace_placeholders(src_got, context)
+            if not src:
+                continue
+            abs_src = normalize_media_src(src)
+            if abs_src.startswith("http"):
+                pass  # Will attempt
+            else:
+                try:
+                    ensure_file_exists(abs_src)
+                except FileNotFoundError:
+                    pass
+            audio_inputs.append({"src": abs_src, "item": item})
     else:
         for track in tracks:
             ttype = track.get("type")
@@ -1239,6 +1091,8 @@ def render_preview(template_json, context_data=None, output_path=None):
     # 5️⃣ AUDIO FILTERS (SAFE & DYNAMIC)
     # -------------------------------------------------
     audio_sources = []
+    has_external_audio = len(audio_inputs) > 0
+
     for i, v in enumerate(visual_inputs):
         if (v.get("media_type") or "").lower() == "video":
             if not has_audio_stream(v["src"]):
@@ -1254,6 +1108,9 @@ def render_preview(template_json, context_data=None, output_path=None):
             vol = safe_float(v["item"].get("details", {}).get("volume", 100)) / 100.0
             if vol <= 0:
                 continue
+            # When mixing with MP3, lower video volume so both play together
+            if has_external_audio and vol > 0.5:
+                vol = 0.4
             audio_sources.append({
                 "index": i,
                 "start_ms": start_ms,
