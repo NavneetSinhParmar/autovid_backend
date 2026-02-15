@@ -304,29 +304,48 @@ def resolve_font_file(details: Dict[str, Any]) -> str:
 
 def compute_line_spacing(line_height, font_size):
     """
-    Calculate line spacing based on line-height value.
-    Handles: 'normal', '24px', '1.5', 1.2, etc.
-    Returns: spacing in pixels between lines. Use 0 for "normal" to avoid extra gap.
+    Convert CSS-like line-height into FFmpeg line_spacing.
+
+    CSS:
+        1.2      -> multiplier
+        "60px"   -> pixel height
+        60       -> pixel height
+        "normal" -> default
+
+    FFmpeg:
+        line_spacing = extra pixels between lines
     """
-    if line_height in (None, "", "normal"):
+
+    if not line_height or line_height in ("normal", ""):
         return 0
 
     try:
-        if isinstance(line_height, str):
-            line_height = line_height.strip().lower()
-            if line_height.endswith("px"):
-                px_val = float(line_height.replace("px", ""))
-                return max(0, int(round(px_val - font_size)))
-            elif line_height == "normal":
-                return 0
+        font_size = float(font_size)
 
-        val = float(line_height)
-        if val < 1:
-            return 0
-        elif val < 3:  # em-based (1.2, 1.5)
-            return max(0, int(round(font_size * (val - 1.0))))
-        else:
-            return max(0, int(round(val - font_size)))
+        # -------- Case 1: Explicit px string --------
+        if isinstance(line_height, str) and "px" in line_height:
+            px_val = float(line_height.replace("px", "").strip())
+            return int(px_val - font_size)
+
+        # -------- Case 2: Pure number --------
+        if isinstance(line_height, (int, float)):
+            # If value <= 4 → treat as multiplier
+            if line_height <= 4:
+                return int((float(line_height) - 1.0) * font_size)
+            else:
+                # treat as pixel value
+                return int(float(line_height) - font_size)
+
+        # -------- Case 3: Numeric string --------
+        if isinstance(line_height, str) and line_height.replace(".", "", 1).isdigit():
+            numeric_val = float(line_height)
+
+            if numeric_val <= 4:
+                return int((numeric_val - 1.0) * font_size)
+            else:
+                return int(numeric_val - font_size)
+
+        return 0
 
     except Exception:
         return 0
@@ -452,31 +471,36 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
 
     if context and isinstance(context, dict):
         raw_text = replace_placeholders(raw_text, context)
-    print("TEXT AFTER REPLACE:", raw_text)
-
+    # ------------------------
+    # TEXT SETTINGS
+    # ------------------------
     font_size = int(details.get("fontSize", 40) * scale_val)
     font_size = min(font_size, 200)  # Limit to 200px maximum
+
     opacity = float(details.get("opacity", 100)) / 100.0
-    letter_spacing = parse_px(details.get("letterSpacing", 0)) if details.get("letterSpacing") not in (None, "normal") else 0.0
-    letter_spacing = letter_spacing * scale_val
-    line_spacing = compute_line_spacing(details.get("lineHeight", "normal"), font_size)
+    
+    letter_spacing = 0
+    if details.get("letterSpacing") not in (None, "normal"):
+        letter_spacing = parse_px(details.get("letterSpacing", 0)) * scale_val
 
-    # --- REMOVED EARLY ALIGN BLOCK (caused NameError) ---
+    line_spacing = compute_line_spacing(
+        details.get("lineHeight", "normal"),
+        font_size
+    )
 
-    # Parse width for wrapping and box
+    # ------------------------
+    # WIDTH + WRAP
+    # ------------------------
     raw_width = details.get("width")
     max_width = 0
     try:
         if raw_width not in (None, "", 0, "0", "0px"):
             max_width = float(parse_px(raw_width)) * scale_val
-    except Exception as e:
-        print(f"Warning: Could not parse width '{raw_width}': {e}")
-        max_width = 0.0
+    except:
+        max_width = 0
 
     word_wrap = details.get("wordWrap", "normal")
     word_break = details.get("wordBreak", "normal")
-
-    print(f"DEBUG: raw_text={raw_text[:50] if raw_text else ''}, max_width={max_width}, font_size={font_size}")
 
     wrapped_text = wrap_text(
         raw_text,
@@ -496,7 +520,9 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
 
     text = ffmpeg_escape_text(wrapped_text)
 
-    # Use exact left/top from JSON
+    # ------------------------
+    # POSITION
+    # ------------------------
     left = parse_px(details.get("left", 0))
     top = parse_px(details.get("top", 0))
 
@@ -512,9 +538,6 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
         x_expr = f"{left}+{box_w}-text_w"
     else:
         x_expr = f"{left}"
-
-    print(f"DEBUG - left={left}, box_w={box_w}, canvas_w={canvas_w}")
-    print(f"DEBUG - x_expr before substitution: {x_expr}")
 
     # Always use exact top
     y_expr = f"{top}"
@@ -546,19 +569,26 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
     else:
         base_params.append("text_align=left")
 
+    # Letter spacing
     if letter_spacing:
         base_params.append(f"letter_spacing={int(letter_spacing)}")
-    if line_spacing > 0:
+
+    # Line spacing
+    if line_spacing:
         base_params.append(f"line_spacing={int(line_spacing)}")
+
+    # Background box
     if bg_color[3] > 0:
         base_params.append("box=1")
         base_params.append(f"boxcolor={bg_color_str}")
+    # Border    
     border_width = details.get("borderWidth", 0)
     border_color = details.get("borderColor", "transparent")
     if border_width and border_color and border_color != "transparent":
         base_params.append(f"borderw={int(border_width)}")
         base_params.append(f"bordercolor={ffmpeg_color(parse_color(border_color), opacity)}")
 
+    # Shadow    
     shadows = []
     text_shadow = parse_shadow_string(details.get("textShadow", "none"))
     if text_shadow:
@@ -594,7 +624,8 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
         ]
         if letter_spacing:
             shadow_params.append(f"letter_spacing={int(letter_spacing)}")
-        if line_spacing is not None and line_spacing > 0:
+
+        if line_spacing:
             shadow_params.append(f"line_spacing={int(line_spacing)}")
         filter_parts.append(
             f"{current_label}drawtext={':'.join(shadow_params)}:enable='between(t,{start},{end})'{shadow_label}"
