@@ -3,6 +3,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime
 from bson import ObjectId
 from typing import Union, List, Dict, Any
+import io
+import csv
+from openpyxl import load_workbook
 
 from app.db.connection import db
 from app.utils.auth import require_roles, hash_password
@@ -14,9 +17,174 @@ from fastapi import Request
 
 router = APIRouter(prefix="/customer", tags=["Customer Management"])
 print("Customer router loaded")
+
 # --------------------------------------------------------
-# 🟢 Helper: Convert string → ObjectId with safe handling
+# 🟢 BULK UPLOAD: Excel + Logo Files
 # --------------------------------------------------------
+@router.post("/bulk-upload")
+async def bulk_upload_customers(
+    excel_file: UploadFile = File(...),
+    logo_files: List[UploadFile] = File(default=[]),
+    linked_company_id: str = Form(None),
+    user=Depends(require_roles("superadmin", "company")),
+):
+
+    print("Received logos:", [file.filename for file in logo_files])
+
+    try:
+        filename = excel_file.filename.lower()
+        is_csv = filename.endswith(".csv")
+        is_excel = filename.endswith((".xlsx", ".xls"))
+
+        if not (is_csv or is_excel):
+            raise HTTPException(
+                status_code=400,
+                detail="File must be Excel (.xlsx, .xls) or CSV (.csv)",
+            )
+
+        file_content = await excel_file.read()
+        if not file_content:
+            raise HTTPException(status_code=400, detail="File is empty")
+
+        # -------- Parse File --------
+        headers = []
+        rows_data = []
+
+        if is_csv:
+            text_content = file_content.decode("utf-8")
+            reader = csv.DictReader(io.StringIO(text_content))
+            headers = [h.strip() for h in (reader.fieldnames or [])]
+            rows_data = list(reader)
+
+        else:
+            workbook = load_workbook(io.BytesIO(file_content))
+            worksheet = workbook.active
+
+            headers = [str(cell.value).strip() for cell in worksheet[1]]
+
+            for row in worksheet.iter_rows(min_row=2, values_only=True):
+                if not any(row):
+                    continue
+                row_dict = {}
+                for idx, header in enumerate(headers):
+                    if idx < len(row):
+                        row_dict[header] = row[idx]
+                rows_data.append(row_dict)
+
+        if not headers:
+            raise HTTPException(status_code=400, detail="Headers missing")
+
+        # -------- Build Logo Map --------
+        logo_files_map = {
+            file.filename.strip(): file
+            for file in logo_files
+            if file.filename
+        }
+
+        print("Logo map:", list(logo_files_map.keys()))
+
+        # -------- Resolve Company --------
+        company_id = None
+
+        if user["role"] == "company":
+            company = await db.companies.find_one({"user_id": str(user["_id"])})
+            if company:
+                company_id = str(company["_id"])
+
+        elif user["role"] == "superadmin":
+            if not linked_company_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="linked_company_id required for superadmin"
+                )
+            company_id = linked_company_id
+
+        # -------- Process Rows --------
+        results = []
+        row_num = 2
+        logo_path_cache = {}
+
+        for row_data in rows_data:
+
+            if not any(row_data.get(f) for f in ["username", "email", "password", "full_name"]):
+                row_num += 1
+                continue
+
+            try:
+                logo_filename = (
+                    str(row_data.get("logo_url", "")).strip()
+                    or str(row_data.get("logo_file_name", "")).strip()
+                )
+
+                logo_url = None
+
+                if logo_filename:
+
+                    # Reuse cached
+                    if logo_filename in logo_path_cache:
+                        logo_url = logo_path_cache[logo_filename]
+
+                    # Save if uploaded
+                    elif logo_filename in logo_files_map and company_id:
+                        from app.services.storage import save_upload_file
+
+                        logo_file = logo_files_map[logo_filename]
+                        path, _ = await save_upload_file(logo_file, company_id)
+
+                        logo_url = path   # ✅ store raw path only
+                        logo_path_cache[logo_filename] = path
+
+                    else:
+                        print(f"Logo not uploaded: {logo_filename}")
+
+                customer_data = {
+                    "username": str(row_data.get("username")).strip(),
+                    "email": str(row_data.get("email")).strip(),
+                    "password": str(row_data.get("password")).strip(),
+                    "full_name": str(row_data.get("full_name")).strip(),
+                    "customer_company_name": row_data.get("customer_company_name"),
+                    "city": row_data.get("city"),
+                    "phone_number": row_data.get("phone_number"),
+                    "telephone_number": row_data.get("telephone_number"),
+                    "address": row_data.get("address"),
+                    "linked_company_id": company_id,
+                }
+
+                if logo_url:
+                    customer_data["logo_url"] = logo_url
+
+                result = await create_single_customer(customer_data, user)
+
+                results.append({
+                    "success": True,
+                    "row": row_num,
+                    "data": result
+                })
+
+            except Exception as e:
+                results.append({
+                    "success": False,
+                    "row": row_num,
+                    "error": str(e),
+                    "data": row_data
+                })
+
+            row_num += 1
+
+        successful = sum(1 for r in results if r["success"])
+        failed = len(results) - successful
+
+        return {
+            "message": "Bulk upload completed",
+            "total_rows": len(results),
+            "successful": successful,
+            "failed": failed,
+            "results": results,
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 def to_oid(value: str):
     try:
         return ObjectId(value)
@@ -46,7 +214,9 @@ async def create_single_customer(data: Dict[str, Any], user: Dict):
                                 detail="linked_company_id is required for superadmin")
 
     # 3️⃣ Check Duplicate User
-    if await db.users.find_one({"username": data["username"]}):
+    print(f"Checking for existing user with username: {data.get('username')} or email: {data.get('email')}")
+    print("Querying database for duplicates...",data.get("username"))
+    if await db.users.find_one({"username": data.get("username")}):
         raise HTTPException(status_code=400, detail="Username already exists")
 
     if await db.users.find_one({"email": data["email"]}):
@@ -54,7 +224,7 @@ async def create_single_customer(data: Dict[str, Any], user: Dict):
 
     # 4️⃣ Create User Record
     user_doc = {
-        "username": data["username"],
+        "username": data.get("username"),
         "email": data["email"],
         "password": hash_password(data["password"]),
         "role": "customer",
@@ -146,7 +316,7 @@ async def create_customer_handler(
         # Save logo if provided
         if logo_file:
             
-            path, _ = await save_customer_file(logo_file, data["username"])
+            path, _ = await save_customer_file(logo_file, data.get("username"))
             data["logo_url"] = path
             print("Logo saved at:", path)
         return await create_single_customer(data, user)
