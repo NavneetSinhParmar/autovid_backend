@@ -305,48 +305,31 @@ def resolve_font_file(details: Dict[str, Any]) -> str:
 def compute_line_spacing(line_height, font_size):
     """
     Convert CSS-like line-height into FFmpeg line_spacing.
-
-    CSS:
-        1.2      -> multiplier
-        "60px"   -> pixel height
-        60       -> pixel height
-        "normal" -> default
-
-    FFmpeg:
-        line_spacing = extra pixels between lines
+    CSS line-height:
+        1.2  -> 1.2 * font_size
+        50px -> exact pixel height
+    FFmpeg line_spacing:
+        Extra pixels between lines
     """
-
     if not line_height or line_height in ("normal", ""):
         return 0
 
     try:
         font_size = float(font_size)
 
-        # -------- Case 1: Explicit px string --------
+        # Case 1: multiplier (1.2, 1.5 etc)
+        if isinstance(line_height, (int, float)) or str(line_height).replace(".", "", 1).isdigit():
+            line_height = float(line_height)
+            extra = (line_height - 1.0) * font_size
+            return int(extra)
+
+        # Case 2: px value (like "60px")
         if isinstance(line_height, str) and "px" in line_height:
             px_val = float(line_height.replace("px", "").strip())
-            return int(px_val - font_size)
-
-        # -------- Case 2: Pure number --------
-        if isinstance(line_height, (int, float)):
-            # If value <= 4 → treat as multiplier
-            if line_height <= 4:
-                return int((float(line_height) - 1.0) * font_size)
-            else:
-                # treat as pixel value
-                return int(float(line_height) - font_size)
-
-        # -------- Case 3: Numeric string --------
-        if isinstance(line_height, str) and line_height.replace(".", "", 1).isdigit():
-            numeric_val = float(line_height)
-
-            if numeric_val <= 4:
-                return int((numeric_val - 1.0) * font_size)
-            else:
-                return int(numeric_val - font_size)
+            extra = px_val - font_size
+            return int(extra)
 
         return 0
-
     except Exception:
         return 0
 
@@ -520,9 +503,7 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
 
     text = ffmpeg_escape_text(wrapped_text)
 
-    # ------------------------
-    # POSITION
-    # ------------------------
+    # Use exact left/top from JSON
     left = parse_px(details.get("left", 0))
     top = parse_px(details.get("top", 0))
 
@@ -538,6 +519,9 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
         x_expr = f"{left}+{box_w}-text_w"
     else:
         x_expr = f"{left}"
+
+    print(f"DEBUG - left={left}, box_w={box_w}, canvas_w={canvas_w}")
+    print(f"DEBUG - x_expr before substitution: {x_expr}")
 
     # Always use exact top
     y_expr = f"{top}"
@@ -569,26 +553,24 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
     else:
         base_params.append("text_align=left")
 
-    # Letter spacing
     if letter_spacing:
         base_params.append(f"letter_spacing={int(letter_spacing)}")
 
-    # Line spacing
-    if line_spacing:
-        base_params.append(f"line_spacing={int(line_spacing)}")
+    if line_spacing != 0:
+        base_params.append(f"line_spacing={line_spacing}")
 
-    # Background box
+
+    if letter_spacing:
+        base_params.append(f"letter_spacing={int(letter_spacing)}")
     if bg_color[3] > 0:
         base_params.append("box=1")
         base_params.append(f"boxcolor={bg_color_str}")
-    # Border    
     border_width = details.get("borderWidth", 0)
     border_color = details.get("borderColor", "transparent")
     if border_width and border_color and border_color != "transparent":
         base_params.append(f"borderw={int(border_width)}")
         base_params.append(f"bordercolor={ffmpeg_color(parse_color(border_color), opacity)}")
 
-    # Shadow    
     shadows = []
     text_shadow = parse_shadow_string(details.get("textShadow", "none"))
     if text_shadow:
@@ -624,9 +606,6 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
         ]
         if letter_spacing:
             shadow_params.append(f"letter_spacing={int(letter_spacing)}")
-
-        if line_spacing:
-            shadow_params.append(f"line_spacing={int(line_spacing)}")
         filter_parts.append(
             f"{current_label}drawtext={':'.join(shadow_params)}:enable='between(t,{start},{end})'{shadow_label}"
         )
@@ -786,10 +765,11 @@ def safe_float(val):
     except (ValueError, IndexError):
         return 0.0
     
-def render_image_preview(template_json, customer, company, output_path):
-    design = template_json["design"]
-    canvas_w = design["size"]["width"]
-    canvas_h = design["size"]["height"]
+    
+def anf(template_json, customer, company, output_path):
+    design = template_json.get("design", {})
+    canvas_w = design.get("size", {}).get("width", 1920)
+    canvas_h = design.get("size", {}).get("height", 1080)
 
     context = {
         "customer": customer,
@@ -805,10 +785,15 @@ def render_image_preview(template_json, customer, company, output_path):
     bg = find_background(template_json)
 
     if bg:
-        bg_src = bg["details"]["src"]
-        inputs.append(bg_src)
-        filters.append(f"[0:v]scale={canvas_w}:{canvas_h}[base]")
-        last = "[base]"
+        bg_details = bg.get("details", {})
+        bg_src = bg_details.get("src")
+        if bg_src:
+            inputs.append(bg_src)
+            filters.append(f"[0:v]scale={canvas_w}:{canvas_h}[base]")
+            last = "[base]"
+        else:
+            filters.append(f"color=c=transparent:s={canvas_w}x{canvas_h}[base]")
+            last = "[base]"
     else:
         filters.append(f"color=c=transparent:s={canvas_w}x{canvas_h}[base]")
         last = "[base]"
@@ -821,9 +806,25 @@ def render_image_preview(template_json, customer, company, output_path):
     image_items = get_image_items(template_json)
 
     for idx, img in enumerate(image_items):
-        src = img["details"]["src"]
-        x = int(float(img["details"].get("left", "0px").replace("px", "")))
-        y = int(float(img["details"].get("top", "0px").replace("px", "")))
+        # Safely access nested details
+        img_details = img.get("details", {}) if isinstance(img, dict) else {}
+        src = img_details.get("src", "")
+        
+        if not src:
+            continue  # Skip if no source
+            
+        x_str = img_details.get("left", "0px")
+        y_str = img_details.get("top", "0px")
+        
+        try:
+            x = int(float(str(x_str).replace("px", "")))
+        except (ValueError, AttributeError):
+            x = 0
+            
+        try:
+            y = int(float(str(y_str).replace("px", "")))
+        except (ValueError, AttributeError):
+            y = 0
 
         inputs.append(src)
 
@@ -840,22 +841,45 @@ def render_image_preview(template_json, customer, company, output_path):
     text_items = get_text_items(template_json)
 
     for idx, item in enumerate(text_items):
-        raw_text = item["details"].get("text", "")
+        item_details = item.get("details", {}) if isinstance(item, dict) else {}
+        raw_text = item_details.get("text", "")
         text = replace_placeholders(raw_text, context)
 
         if not text:
             continue
 
-        x = int(float(item["details"].get("left", "0px").replace("px", "")))
-        y = int(float(item["details"].get("top", "0px").replace("px", "")))
-        font_size = int(item["details"].get("fontSize", 32))
-        color = item["details"].get("color", "#ffffff").replace("#", "")
-        font = item["details"].get("fontFamily", "Arial")
+        x_str = item_details.get("left", "0px")
+        y_str = item_details.get("top", "0px")
+        
+        try:
+            x = int(float(str(x_str).replace("px", "")))
+        except (ValueError, AttributeError):
+            x = 0
+            
+        try:
+            y = int(float(str(y_str).replace("px", "")))
+        except (ValueError, AttributeError):
+            y = 0
+            
+        font_size = int(item_details.get("fontSize", 32))
+        color = item_details.get("color", "#ffffff").replace("#", "")
+        font = item_details.get("fontFamily", "Arial")
+
+        # Prefer using a temporary text file to avoid complex escaping in drawtext
+        textfile_path = ""
+        try:
+            textfile_path = write_text_temp(text)
+        except Exception:
+            textfile_path = ""
+
+        if textfile_path:
+            text_source = f"textfile='{ffmpeg_escape_path(textfile_path)}'"
+        else:
+            escaped_text = ffmpeg_escape_text(text)
+            text_source = f"text='{escaped_text}'"
 
         filters.append(
-            f"{last}drawtext=text='{text}':"
-            f"x={x}:y={y}:fontsize={font_size}:fontcolor={color}"
-            f"[txt{idx}]"
+            f"{last}drawtext={text_source}:x={x}:y={y}:fontsize={font_size}:fontcolor={color}[txt{idx}]"
         )
 
         last = f"[txt{idx}]"
@@ -876,6 +900,32 @@ def render_image_preview(template_json, customer, company, output_path):
     ]
 
     subprocess.run(cmd, check=True)
+
+def render_image_preview(template_json, context_data=None, output_path=None):
+    """
+    Render a static image preview from a template.
+    
+    Args:
+        template_json: The template design JSON
+        context_data: Either a dict with {"customer": {...}, "company": {...}} 
+                     or a string path (for backwards compatibility)
+        output_path: Path where the image should be saved
+    """
+    # Handle flexible arguments similar to render_preview
+    if output_path is None and isinstance(context_data, str):
+        output_path = context_data
+        context_data = None
+    
+    # Extract customer and company from context
+    if isinstance(context_data, dict) and "customer" in context_data and "company" in context_data:
+        customer = context_data.get("customer", {})
+        company = context_data.get("company", {})
+    else:
+        customer = context_data if isinstance(context_data, dict) else {}
+        company = {}
+    
+    # Call the anf function which handles static image rendering
+    anf(template_json, customer, company, output_path)
 
 def render_preview(template_json, context_data=None, output_path=None):
     if output_path is None and isinstance(context_data, str):

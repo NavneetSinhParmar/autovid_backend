@@ -273,8 +273,9 @@ async def preview_template_customer(template_id: str, customer_id: str):
     template_type = template.get("type", "video")
 
     # 🔀 IMAGE
-    if template_type == "image":
-        preview_filename = f"{template_id}_{customer_id}_preview.png"
+    if template_type == "img":
+        print("Rendering image preview for template:", template_id, "and customer:", customer_id)
+        preview_filename = f"{template_id}_{customer_id}_preview.jpg"
         preview_path = os.path.join(media_dir, preview_filename)
 
         await run_in_threadpool(
