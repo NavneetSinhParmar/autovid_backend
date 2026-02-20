@@ -14,6 +14,7 @@ from fastapi import Request, UploadFile, File, Form
 from app.services.storage import save_customer_file
 from app.services.url import build_media_url
 from fastapi import Request
+from app.services.storage import save_upload_file
 
 router = APIRouter(prefix="/customer", tags=["Customer Management"])
 print("Customer router loaded")
@@ -125,8 +126,7 @@ async def bulk_upload_customers(
                         logo_url = logo_path_cache[logo_filename]
 
                     # Save if uploaded
-                    elif logo_filename in logo_files_map and company_id:
-                        from app.services.storage import save_upload_file
+                    elif logo_filename in logo_files_map and company_id:                        
 
                         logo_file = logo_files_map[logo_filename]
                         path, _ = await save_upload_file(logo_file, company_id)
@@ -269,10 +269,22 @@ async def create_single_customer(data: Dict[str, Any], user: Dict):
 async def create_customer_handler(
     request: Request,
     logo_file: UploadFile = File(None),  # optional
+    linked_company_id: str = Form(None),
     user=Depends(require_roles("superadmin", "company")),
 ):
     content_type = request.headers.get("content-type", "")
+    if user["role"] == "company":
+        company = await db.companies.find_one({"user_id": str(user["_id"])})
+        if company:
+            company_id = str(company["_id"])
 
+    elif user["role"] == "superadmin":
+        if not linked_company_id:
+            raise HTTPException(
+                status_code=400,
+                detail="linked_company_id required for superadmin"
+            )
+        company_id = linked_company_id
     # ----------------------------------
     # 🔵 CASE 1: JSON → Bulk or Single
     # ----------------------------------
@@ -316,7 +328,7 @@ async def create_customer_handler(
         # Save logo if provided
         if logo_file:
             
-            path, _ = await save_customer_file(logo_file, data.get("username"))
+            path, _ = await save_customer_file(logo_file,company_id, data.get("username"))
             data["logo_url"] = path
             print("Logo saved at:", path)
         return await create_single_customer(data, user)
