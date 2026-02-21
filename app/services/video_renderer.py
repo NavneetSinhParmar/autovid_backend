@@ -933,11 +933,6 @@ def render_preview(template_json, context_data=None, output_path=None):
             details = item.get("details", {})
             src_got = details.get("src", "")
             item_type = item.get("type", "unknown")
-            
-            print(f"\n🔵 VISUAL ITEM ({item_type}) - ID: {item_id}:")
-            print(f"   Full item details: {json.dumps(item, indent=6, default=str)[:500]}...")
-            print(f"   Original src: {src_got}")
-            
             # Smart mapping for dummy placeholder URLs
             src_got = smart_logo_mapping(src_got)
             if src_got.startswith("{{"):
@@ -997,9 +992,6 @@ def render_preview(template_json, context_data=None, output_path=None):
                 src_got = details.get("src", "")
                 
                 if ttype in ["video", "image"]:
-                    print(f"\n🔵 VISUAL ITEM ({ttype}) from tracks - ID: {item_id}:")
-                    print(f"   Full item details: {json.dumps(item, indent=6, default=str)[:500]}...")
-                    print(f"   Original src: {src_got}")
                     
                     # Smart mapping for dummy placeholder URLs
                     src_got = smart_logo_mapping(src_got)
@@ -1194,10 +1186,6 @@ def render_preview(template_json, context_data=None, output_path=None):
     # 6️⃣ BUILD FFMPEG COMMAND
     # -------------------------------------------------
     
-    # DEBUG: Report on collected inputs
-    print("\n" + "=" * 80)
-    print("📊 COLLECTED INPUTS SUMMARY:")
-    print(f"   Visual inputs: {len(visual_inputs)}")
     if not visual_inputs:
         print("   ⚠️ WARNING: No visual inputs collected!")
     for i, v in enumerate(visual_inputs):
