@@ -96,7 +96,6 @@ def replace_placeholders(text: str, context: dict) -> str:
             continue
 
         for key, value in data.items():
-            print(f"Replacing {{{{{scope}.{key}}}}} with {value}")
             if isinstance(value, (str, int, float)):
                 text = text.replace(
                     f"{{{{{scope}.{key}}}}}",
@@ -914,8 +913,6 @@ def render_preview(template_json, context_data=None, output_path=None):
     track_items_map = design.get("trackItemsMap", {})
     tracks = design.get("tracks", [])
     duration = float(duration)
-    print("customer in render preview", customer)
-    print("company in render preview", company)
 
     canvas_w, canvas_h = resolve_canvas_size(design)
     fps = resolve_fps(design)
@@ -929,10 +926,6 @@ def render_preview(template_json, context_data=None, output_path=None):
     # -------------------------------------------------
     track_item_ids = design.get("trackItemIds", [])
     ordered_visual_ids = [tid for tid in track_item_ids if track_items_map.get(tid, {}).get("type") in ["video", "image"]]
-
-    print(f"\n📍 Track Item IDs: {len(track_item_ids)}")
-    print(f"📍 Ordered Visual IDs: {len(ordered_visual_ids)}")
-    print(f"📍 Using path: {'trackItemIds' if ordered_visual_ids else 'tracks'}")
 
     if ordered_visual_ids:
         for item_id in ordered_visual_ids:
