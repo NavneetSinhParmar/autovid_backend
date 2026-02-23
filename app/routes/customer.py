@@ -19,9 +19,28 @@ from app.services.storage import save_upload_file
 router = APIRouter(prefix="/customer", tags=["Customer Management"])
 print("Customer router loaded")
 
+def validate_image_file(file: UploadFile):
+    allowed_extensions = (".png", ".jpg", ".jpeg")
+    allowed_types = ["image/png", "image/jpeg", "image/jpg"]
+
+    filename = file.filename.lower()
+
+    if not filename.endswith(allowed_extensions):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{file.filename} must be PNG or JPG/JPEG format"
+        )
+
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{file.filename} has invalid content type"
+        )
+
 # --------------------------------------------------------
 # 🟢 BULK UPLOAD: Excel + Logo Files
 # --------------------------------------------------------
+
 @router.post("/bulk-upload")
 async def bulk_upload_customers(
     excel_file: UploadFile = File(...),
@@ -121,6 +140,23 @@ async def bulk_upload_customers(
 
                 if logo_filename:
 
+                    # 🔴 Case 1: Logo name given but file not uploaded
+                    if not logo_files_map:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Row {row_num}: Logo '{logo_filename}' mentioned but no logo files uploaded"
+                        )
+
+                    # 🔴 Case 2: Filename mismatch
+                    if logo_filename not in logo_files_map:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Row {row_num}: Logo filename mismatch '{logo_filename}' not found in uploaded files"
+                        )
+
+                    logo_file = logo_files_map[logo_filename]
+                    validate_image_file(logo_files_map[logo_filename])
+
                     # Reuse cached
                     if logo_filename in logo_path_cache:
                         logo_url = logo_path_cache[logo_filename]
@@ -130,7 +166,6 @@ async def bulk_upload_customers(
 
                         logo_file = logo_files_map[logo_filename]
                         path, _ = await save_upload_file(logo_file, company_id)
-
                         logo_url = path   # ✅ store raw path only
                         logo_path_cache[logo_filename] = path
 
@@ -195,72 +230,97 @@ def to_oid(value: str):
 # 🟢 Helper: Validate and Create Customer Document
 # --------------------------------------------------------
 async def create_single_customer(data: Dict[str, Any], user: Dict):
-    print("Creating single customer with data:", data)
+    try:
+        print("Creating single customer with data:", data)
 
-    # 1️⃣ If logged user is COMPANY → auto set linked_company_id
-    if user["role"] == "company":
-        company = await db.companies.find_one({"user_id": str(user["_id"])})
+        # -----------------------------
+        # ✅ REQUIRED FIELD VALIDATION
+        # -----------------------------
+        required_fields = ["username", "email", "password", "full_name"]
 
-        if not company:
-            raise HTTPException(status_code=404,
-                                detail="Company record not found for this user")
-        
-        data["linked_company_id"] = str(company["_id"])  # override automatically
+        for field in required_fields:
+            if not data.get(field):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{field} is required"
+                )
 
-    # 2️⃣ SUPERADMIN must give linked_company_id
-    elif user["role"] == "superadmin":
-        if "linked_company_id" not in data:
-            raise HTTPException(status_code=400,
-                                detail="linked_company_id is required for superadmin")
+        # -----------------------------
+        # COMPANY AUTO LINK
+        # -----------------------------
+        if user["role"] == "company":
+            company = await db.companies.find_one({"user_id": str(user["_id"])})
+            if not company:
+                raise HTTPException(404, "Company record not found")
+            data["linked_company_id"] = str(company["_id"])
 
-    # 3️⃣ Check Duplicate User
-    print(f"Checking for existing user with username: {data.get('username')} or email: {data.get('email')}")
-    print("Querying database for duplicates...",data.get("username"))
-    if await db.users.find_one({"username": data.get("username")}):
-        raise HTTPException(status_code=400, detail="Username already exists")
+        elif user["role"] == "superadmin":
+            if not data.get("linked_company_id"):
+                raise HTTPException(
+                    400,
+                    "linked_company_id is required for superadmin"
+                )
 
-    if await db.users.find_one({"email": data["email"]}):
-        raise HTTPException(status_code=400, detail="Email already exists")
+        # -----------------------------
+        # DUPLICATE CHECK
+        # -----------------------------
+        if await db.users.find_one({"username": data["username"]}):
+            raise HTTPException(400, "Username already exists")
 
-    # 4️⃣ Create User Record
-    user_doc = {
-        "username": data.get("username"),
-        "email": data["email"],
-        "password": hash_password(data["password"]),
-        "role": "customer",
-        "status": "active",
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow(),
-    }
+        if await db.users.find_one({"email": data["email"]}):
+            raise HTTPException(400, "Email already exists")
 
-    inserted_user = await db.users.insert_one(user_doc)
-    user_id = str(inserted_user.inserted_id)
+        # -----------------------------
+        # CREATE USER
+        # -----------------------------
+        user_doc = {
+            "username": data["username"],
+            "email": data["email"],
+            "password": hash_password(data["password"]),
+            "role": "customer",
+            "status": "active",
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        }
 
-    # 5️⃣ Prepare Customer Record
-    customer_doc = {
-        "customer_company_name": data.get("customer_company_name"),
-        "full_name": data["full_name"],
-        "logo_url": data.get("logo_url"),
-        "city": data.get("city"),
-        "phone_number": data.get("phone_number"),
-        "telephone_number": data.get("telephone_number"),
-        "address": data.get("address"),
+        inserted_user = await db.users.insert_one(user_doc)
+        user_id = inserted_user.inserted_id
 
-        "linked_company_id": to_oid(data["linked_company_id"]),
-        "user_id": to_oid(user_id),
+        # -----------------------------
+        # CREATE CUSTOMER
+        # -----------------------------
+        customer_doc = {
+            "customer_company_name": data.get("customer_company_name"),
+            "full_name": data["full_name"],
+            "logo_url": data.get("logo_url"),
+            "city": data.get("city"),
+            "phone_number": data.get("phone_number"),
+            "telephone_number": data.get("telephone_number"),
+            "address": data.get("address"),
+            "linked_company_id": to_oid(data["linked_company_id"]),
+            "user_id": user_id,
+            "status": "active",
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        }
 
-        "status": "active",
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow(),
-    }
+        inserted = await db.customers.insert_one(customer_doc)
 
-    inserted = await db.customers.insert_one(customer_doc)
+        return {
+            "message": "Customer created successfully",
+            "customer_id": str(inserted.inserted_id),
+            "user_id": str(user_id),
+        }
 
-    return {
-        "message": "Customer created successfully",
-        "customer_id": str(inserted.inserted_id),
-        "user_id": user_id,
-    }
+    except HTTPException:
+        raise  # re-raise validation errors
+
+    except Exception as e:
+        print("🔥 INTERNAL ERROR:", str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal error: {str(e)}"
+        )
 
 # --------------------------------------------------------
 # 🟢 CREATE CUSTOMER (Single / Bulk)
@@ -327,6 +387,7 @@ async def create_customer_handler(
 
         # Save logo if provided
         if logo_file:
+            validate_image_file(logo_file)
             
             path, _ = await save_customer_file(logo_file,company_id, data.get("username"))
             data["logo_url"] = path
@@ -335,36 +396,6 @@ async def create_customer_handler(
 
     else:
         raise HTTPException(status_code=415, detail="Unsupported Content-Type")
-
-# @router.post("/")
-# async def create_customer_handler(
-#     data: Union[Dict, List[Dict]],
-#     user=Depends(require_roles("superadmin", "company"))
-# ):
-
-#     # 🔵 Bulk Creation
-#     if isinstance(data, list):
-#         if not data:
-#             raise HTTPException(status_code=400, detail="Input list cannot be empty")
-
-#         results = []
-#         for item in data:
-#             try:
-#                 result = await create_single_customer(item, user)
-#                 results.append({"success": True, "data": result})
-#             except HTTPException as e:
-#                 results.append({"success": False, "error": e.detail, "data": item})
-
-#         return {
-#             "message": "Bulk creation completed",
-#             "total": len(data),
-#             "results": results,
-#         }
-
-#     else:
-#         # 🔵 Single Creation
-#         print("Single customer creation")
-#         return await create_single_customer(data, user)
 
 # --------------------------------------------------------
 # 🔵 LIST CUSTOMERS WITH USER + COMPANY JOIN
@@ -547,6 +578,8 @@ async def update_customer(
     if status is not None:
         update_data["status"] = status
     if logo_url is not None:
+        validate_image_file(logo_url)
+
         from app.services.storage import save_upload_file
         path, _ = await save_upload_file(logo_url, f"customer_{customer_id}")
         update_data["logo_url"] = path
