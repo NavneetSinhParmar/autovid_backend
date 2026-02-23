@@ -372,7 +372,21 @@ async def create_customer_handler(
 @router.get("/")
 async def list_customers(request: Request,user=Depends(require_roles("superadmin", "company"))):
 
-    pipeline = [
+    # ✅ FILTER: Company users can only see their own customers
+    match_stage = {}
+    if user["role"] == "company":
+        company = await db.companies.find_one({"user_id": str(user["_id"])})
+        if not company:
+            raise HTTPException(status_code=404, detail="Company not found for this user")
+        match_stage["linked_company_id"] = company["_id"]
+
+    pipeline = []
+    
+    # Add match stage only if there are filters
+    if match_stage:
+        pipeline.append({"$match": match_stage})
+    
+    pipeline.extend([
         {
             "$lookup": {
                 "from": "users",
@@ -391,7 +405,7 @@ async def list_customers(request: Request,user=Depends(require_roles("superadmin
             }
         },
         {"$unwind": {"path": "$company", "preserveNullAndEmptyArrays": True}},
-    ]
+    ])
 
     data = []
     async for doc in db.customers.aggregate(pipeline):
@@ -429,8 +443,17 @@ async def list_customers(request: Request,user=Depends(require_roles("superadmin
 @router.get("/{customer_id}")
 async def get_customer(customer_id: str, user=Depends(require_roles("superadmin", "company"))):
 
+    # ✅ AUTHORIZATION: Company users can only access their own customers
+    match_filter = {"_id": to_oid(customer_id)}
+    
+    if user["role"] == "company":
+        company = await db.companies.find_one({"user_id": str(user["_id"])})
+        if not company:
+            raise HTTPException(status_code=404, detail="Company not found for this user")
+        match_filter["linked_company_id"] = company["_id"]
+
     pipeline = [
-        {"$match": {"_id": to_oid(customer_id)}},
+        {"$match": match_filter},
         {
             "$lookup": {
                 "from": "users",
