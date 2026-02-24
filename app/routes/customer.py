@@ -183,6 +183,7 @@ async def bulk_upload_customers(
                     "telephone_number": row_data.get("telephone_number"),
                     "address": row_data.get("address"),
                     "linked_company_id": company_id,
+                    "customer_category": str(row_data.get("customer_category")).strip()
                 }
 
                 if logo_url:
@@ -298,6 +299,7 @@ async def create_single_customer(data: Dict[str, Any], user: Dict):
             "telephone_number": data.get("telephone_number"),
             "address": data.get("address"),
             "linked_company_id": to_oid(data["linked_company_id"]),
+            "customer_category": data.get("customer_category"),  
             "user_id": user_id,
             "status": "active",
             "created_at": datetime.utcnow(),
@@ -507,7 +509,6 @@ async def get_customer(customer_id: str, user=Depends(require_roles("superadmin"
 @router.patch("/{customer_id}")
 async def update_customer(
     customer_id: str,
-
     customer_company_name: str = Form(None),
     full_name: str = Form(None),
     city: str = Form(None),
@@ -516,8 +517,7 @@ async def update_customer(
     address: str = Form(None),
     status: str = Form(None),
     logo_url: UploadFile = File(None),
-
-
+    customer_category: str = Form(None),  # NEW FIELD
     user=Depends(require_roles("company"))
 ):
     # ---- Check customer exists ----
@@ -548,6 +548,8 @@ async def update_customer(
         from app.services.storage import save_upload_file
         path, _ = await save_upload_file(logo_url, f"customer_{customer_id}")
         update_data["logo_url"] = path
+    if customer_category is not None:  # NEW FIELD
+        update_data["customer_category"] = customer_category    
 
     if not update_data:
         raise HTTPException(400, "No fields provided to update")

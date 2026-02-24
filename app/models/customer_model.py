@@ -11,6 +11,7 @@ class CustomerCreate(BaseModel):
     phone_number: Optional[str] = None
     telephone_number: Optional[str] = None
     address: Optional[str] = None
+    customer_category: Optional[str] = None  # NEW FIELD
     
     # Relationships
     linked_company_id: Optional[str] = None   # Company dropdown
@@ -28,6 +29,7 @@ class CustomerOut(BaseModel):
     phone_number: Optional[str]
     telephone_number: Optional[str]
     address: Optional[str]
+    customer_category: Optional[str]  # NEW FIELD
     
     linked_company_id: Optional[str]
     user_id: str
