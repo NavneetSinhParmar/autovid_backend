@@ -11,11 +11,11 @@ class CustomerCreate(BaseModel):
     phone_number: Optional[str] = None
     telephone_number: Optional[str] = None
     address: Optional[str] = None
-    customer_category: Optional[str] = None  # NEW FIELD
+    customer_category: Optional[str] = None
     
     # Relationships
-    linked_company_id: Optional[str] = None   # Company dropdown
-    user_id: str                               # FK → users.id
+    linked_company_id: Optional[str] = None 
+    user_id: str     
     
     status: Optional[str] = "active"
 

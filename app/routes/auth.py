@@ -116,7 +116,8 @@ async def get_profile(user=Depends(get_current_user)):
                 "mobile": company["mobile"],
                 "status": company["status"],
                 "logo_url": company.get("logo_url"),
-
+                "visibility": company.get("visibility"),
+                "description": company.get("description")   
             }
         raise HTTPException(status_code=404, detail="Company profile not found")
 
