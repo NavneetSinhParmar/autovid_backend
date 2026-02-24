@@ -9,6 +9,7 @@ class CompanyCreate(BaseModel):
     logo_url: Optional[str] = None
     user_id: str                     # FK to User table
     status: Optional[str] = "active"
+    visibility: str = "private" 
 
 
 class CompanyOut(BaseModel):
@@ -19,5 +20,7 @@ class CompanyOut(BaseModel):
     logo_url: Optional[str]
     user_id: str
     status: str
+    visibility: str
+    
     created_at: datetime
     updated_at: datetime
