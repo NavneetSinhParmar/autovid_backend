@@ -18,6 +18,7 @@ async def create_company(
     company_name: str = Form(...),
     mobile: str = Form(...),
     description: str = Form(None),
+    visibility: str = Form("private"),
     logo_file: UploadFile = File(None),
     user=Depends(require_roles("superadmin")),
 ):
@@ -58,11 +59,13 @@ async def create_company(
         "logo_url": logo_url,
         "user_id": user_id,
         "status": "active",
+        "visibility": visibility,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
     }
 
     company_result = await db.companies.insert_one(company_doc)
+
 
     return {
         "message": "Company created successfully",
@@ -106,6 +109,13 @@ async def list_companies(request: Request, user=Depends(require_roles("superadmi
             c["user_created_at"] = user_data["created_at"]
             c["user_updated_at"] = user_data["updated_at"]
 
+        # ✅ Ensure created_at and visibility are included
+        if "created_at" not in c:
+            c["created_at"] = None
+        if "visibility" not in c:
+            c["visibility"] = "private"  # default value
+
+
         companies.append(c)
 
     return companies
@@ -126,6 +136,12 @@ async def get_company_detail(company_id: str,request: Request):
     if company.get("logo_url"):
         company["logo_url"] = f"{request.base_url}media/{company['logo_url']}"
 
+    # ✅ Ensure created_at and visibility are included
+    if "created_at" not in company:
+        company["created_at"] = None
+    if "visibility" not in company:
+        company["visibility"] = "private"  # default value    
+
     return company
 
 
@@ -133,14 +149,12 @@ async def get_company_detail(company_id: str,request: Request):
 @router.patch("/{company_id}")
 async def update_company(
     company_id: str,
-
     company_name: Optional[str] = Form(None),
     mobile: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
     status: Optional[str] = Form(None),
-
+    visibility: Optional[str] = Form(None),
     logo_file: Optional[UploadFile] = File(None),
-
     user=Depends(require_roles("superadmin"))
 ):
 
@@ -164,6 +178,13 @@ async def update_company(
     if status is not None:
         update_data["status"] = status
 
+    # ✅ Add visibility to update data if provided
+    if visibility is not None:
+        # Optional: Validate visibility value
+        if visibility not in ["private", "public"]:
+            raise HTTPException(status_code=400, detail="Visibility must be 'private' or 'public'")
+        update_data["visibility"] = visibility    
+
     # ---- STEP 3: Handle logo upload ----
     if logo_file:
         local_path, size = await save_company_file(logo_file, company["user_id"])
@@ -180,9 +201,21 @@ async def update_company(
         {"$set": update_data}
     )
 
+   # Get updated company to return
+    updated_company = await db.companies.find_one({"_id": ObjectId(company_id)})
+    updated_company["company_id"] = str(updated_company["_id"])
+    updated_company.pop("_id", None)
+
     return {
         "message": "Company updated successfully",
-        "updated_fields": list(update_data.keys())
+        "updated_fields": list(update_data.keys()),
+        "company": {
+            "company_id": updated_company["company_id"],
+            "company_name": updated_company.get("company_name"),
+            "visibility": updated_company.get("visibility"),
+            "created_at": updated_company.get("created_at"),
+            "updated_at": updated_company.get("updated_at")
+        }
     }
 
 
