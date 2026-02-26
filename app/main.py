@@ -13,7 +13,6 @@ app.mount("/media", StaticFiles(directory="media"), name="media")
 
 # ✅ CORS setup
 origins = [
-    "http://localhost:3000",
     "https://videoedittool-puce.vercel.app",
 ]
 
