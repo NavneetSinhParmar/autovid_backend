@@ -5,6 +5,7 @@ from bson import ObjectId
 from typing import Union, List, Dict, Any
 import io
 import csv
+import os
 from openpyxl import load_workbook
 
 from app.db.connection import db
@@ -94,14 +95,26 @@ async def bulk_upload_customers(
         if not headers:
             raise HTTPException(status_code=400, detail="Headers missing")
 
-        # -------- Build Logo Map --------
-        logo_files_map = {
-            file.filename.strip(): file
-            for file in logo_files
-            if file.filename
-        }
+        # -------- Build Logo Map (full name + stem) --------
+        logo_files_map = {}         # full filename (lowercase) -> UploadFile
+        logo_files_map_no_ext = {}  # filename stem (lowercase) -> UploadFile or None if ambiguous
 
-        print("Logo map:", list(logo_files_map.keys()))
+        for f in logo_files:
+            if not f.filename:
+                continue
+            fname = f.filename.strip()
+            key_full = fname.lower()
+            logo_files_map[key_full] = f
+
+            stem = os.path.splitext(fname)[0].lower()
+            if stem in logo_files_map_no_ext:
+                # mark ambiguous stems as None so we can error on ambiguity
+                logo_files_map_no_ext[stem] = None
+            else:
+                logo_files_map_no_ext[stem] = f
+
+        print("Logo map (full):", list(logo_files_map.keys()))
+        print("Logo map (stem):", [k for k in logo_files_map_no_ext.keys()])
 
         # -------- Resolve Company --------
         company_id = None
@@ -140,37 +153,51 @@ async def bulk_upload_customers(
 
                 if logo_filename:
 
-                    # 🔴 Case 1: Logo name given but file not uploaded
-                    if not logo_files_map:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Row {row_num}: Logo '{logo_filename}' mentioned but no logo files uploaded"
-                        )
+                        # 🔴 Case 1: Logo name given but no files uploaded
+                        if not logo_files_map:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Row {row_num}: Logo '{logo_filename}' mentioned but no logo files uploaded"
+                            )
 
-                    # 🔴 Case 2: Filename mismatch
-                    if logo_filename not in logo_files_map:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Row {row_num}: Logo filename mismatch '{logo_filename}' not found in uploaded files"
-                        )
+                        # Try exact match (case-insensitive) first, then try matching by stem (without extension)
+                        logo_filename_key = str(logo_filename).strip().lower()
+                        logo_file = None
 
-                    logo_file = logo_files_map[logo_filename]
-                    validate_image_file(logo_files_map[logo_filename])
+                        if logo_filename_key in logo_files_map:
+                            logo_file = logo_files_map[logo_filename_key]
 
-                    # Reuse cached
-                    if logo_filename in logo_path_cache:
-                        logo_url = logo_path_cache[logo_filename]
+                        else:
+                            stem = os.path.splitext(logo_filename_key)[0]
+                            if stem in logo_files_map_no_ext:
+                                if logo_files_map_no_ext[stem] is None:
+                                    # ambiguous: multiple uploaded files share the same stem
+                                    raise HTTPException(
+                                        status_code=400,
+                                        detail=f"Row {row_num}: Ambiguous logo name '{logo_filename}' matches multiple uploaded files"
+                                    )
+                                logo_file = logo_files_map_no_ext[stem]
 
-                    # Save if uploaded
-                    elif logo_filename in logo_files_map and company_id:                        
+                        if not logo_file:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Row {row_num}: Logo filename mismatch '{logo_filename}' not found in uploaded files"
+                            )
 
-                        logo_file = logo_files_map[logo_filename]
-                        path, _ = await save_upload_file(logo_file, company_id)
-                        logo_url = path   # ✅ store raw path only
-                        logo_path_cache[logo_filename] = path
+                        validate_image_file(logo_file)
 
-                    else:
-                        print(f"Logo not uploaded: {logo_filename}")
+                        # Reuse cached (cache keyed by normalized name)
+                        if logo_filename_key in logo_path_cache:
+                            logo_url = logo_path_cache[logo_filename_key]
+
+                        # Save if uploaded and we have a company to save under
+                        elif company_id:
+                            path, _ = await save_upload_file(logo_file, company_id)
+                            logo_url = path   # ✅ store raw path only
+                            logo_path_cache[logo_filename_key] = path
+
+                        else:
+                            print(f"Logo not uploaded: {logo_filename}")
 
                 customer_data = {
                     "username": str(row_data.get("username")).strip(),
