@@ -13,18 +13,16 @@ app.mount("/media", StaticFiles(directory="media"), name="media")
 
 # ✅ CORS setup
 origins = [
-    "http://localhost:3000",  # React frontend
-    "http://127.0.0.1:3000",
-    "https://your-frontend-domain.com"  # Production domain
-    "*"
+    "http://localhost:3000",
+    "https://your-frontend-domain.com",
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],            # URLs allowed to access
-    allow_credentials=True,         # Allow cookies, authorization headers
-    allow_methods=["*"],            # Allow all HTTP methods
-    allow_headers=["*"],            # Allow all headers
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # ✅ Include routers
