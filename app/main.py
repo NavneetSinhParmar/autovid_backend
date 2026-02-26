@@ -14,16 +14,15 @@ app.mount("/media", StaticFiles(directory="media"), name="media")
 # ✅ CORS setup
 origins = [
     "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://your-frontend-domain.com",
+    "https://videoedittool-puce.vercel.app",
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_methods=["*"],          # ✅ allow all methods
+    allow_headers=["*"], 
 )
 
 # ✅ Include routers
