@@ -135,27 +135,18 @@ async def preview_template(template_id: str):
     if not template:
         raise HTTPException(status_code=404, detail="Template Does not exist!")
 
-    # Fetch company name for watermarking
     company_id = template.get("company_id")
-    company_name = "Our Company" # Default fallback
-    
+    company_data = None
     if company_id:
         company_data = await db.companies.find_one({"_id": ObjectId(company_id)})
-        if company_data:
-            company_name = company_data.get("company_name") or company_data.get("name") or "Our Company"
 
-    # 2. Prepare output path
     media_dir = os.path.abspath("media")
     os.makedirs(media_dir, exist_ok=True)
-    preview_filename = f"{template_id}_preview.mp4"
-    print("Preview Of Filename is",preview_filename)
-    preview_path = os.path.join(media_dir, preview_filename)
-    print("Preview path is is",preview_filename)
+    template_type = str(template.get("type", "video")).lower()
 
     try:
-        # 3. Render preview in thread pool
         company_context = {}
-        if company_id and company_data:
+        if company_data:
             company_context = {
                 "company_name": company_data.get("company_name") or company_data.get("name") or "",
                 "logo_url": company_data.get("logo_url") or company_data.get("logoUrl") or company_data.get("logo") or "",
@@ -164,19 +155,29 @@ async def preview_template(template_id: str):
                 "email": company_data.get("email") or "",
             }
 
+        # IMAGE template -> JPEG
+        if template_type in ("img", "image"):
+            preview_filename = f"{template_id}_preview.jpg"
+            preview_path = os.path.join(media_dir, preview_filename)
+            await run_in_threadpool(
+                render_image_preview,
+                template["template_json"],
+                {},
+                company_context,
+                preview_path,
+            )
+            return FileResponse(path=preview_path, media_type="image/jpeg", filename=preview_filename)
+
+        # VIDEO template -> MP4
+        preview_filename = f"{template_id}_preview.mp4"
+        preview_path = os.path.join(media_dir, preview_filename)
         await run_in_threadpool(
             render_preview,
             template,
             {"customer": {}, "company": company_context},
             preview_path,
         )
-        
-        # return {"status": "success", "preview_url": f"/media/{preview_filename}"}
-        return FileResponse(
-            path=preview_path, 
-            media_type="video/mp4", 
-            filename=preview_filename
-        )
+        return FileResponse(path=preview_path, media_type="video/mp4", filename=preview_filename)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -270,24 +271,22 @@ async def preview_template_customer(template_id: str, customer_id: str):
     media_dir = os.path.abspath("media")
     os.makedirs(media_dir, exist_ok=True)
 
-    template_type = template.get("type", "video")
+    template_type = str(template.get("type", "video")).lower()
 
-    # 🔀 IMAGE
-    if template_type == "image":
-        preview_filename = f"{template_id}_{customer_id}_preview.png"
+    # 🔀 IMAGE (img/image) -> JPEG
+    if template_type in ("img", "image"):
+        preview_filename = f"{template_id}_{customer_id}_preview.jpg"
         preview_path = os.path.join(media_dir, preview_filename)
 
         await run_in_threadpool(
             render_image_preview,
             template["template_json"],
-            {
-                "customer": customer,
-                "company": company
-            },
+            customer,
+            company,
             preview_path
         )
 
-        return FileResponse(preview_path, media_type="image/png")
+        return FileResponse(preview_path, media_type="image/jpeg", filename=preview_filename)
 
     # 🎥 VIDEO
     preview_filename = f"{template_id}_{customer_id}_preview.mp4"
@@ -308,7 +307,16 @@ async def preview_template_customer(template_id: str, customer_id: str):
 @router.get("/{template_id}/download/{customer_id}")
 async def download_video(template_id: str, customer_id: str):
 
-    filename = f"{template_id}_{customer_id}_preview.mp4"
+    template = await db.templates.find_one({"_id": ObjectId(template_id)})
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    template_type = str(template.get("type", "video")).lower()
+    is_image = template_type in ("img", "image")
+    ext = "jpg" if is_image else "mp4"
+    media_type = "image/jpeg" if is_image else "video/mp4"
+
+    filename = f"{template_id}_{customer_id}_preview.{ext}"
     file_path = os.path.abspath(os.path.join("media", filename))
 
     if not os.path.exists(file_path):
@@ -319,6 +327,6 @@ async def download_video(template_id: str, customer_id: str):
 
     return FileResponse(
         path=file_path,
-        media_type="video/mp4",
+        media_type=media_type,
         filename=filename
     )

@@ -1,13 +1,12 @@
 import os
 import subprocess
 import shlex
-from typing import Dict, Any, List
+from typing import Dict, Any
 import uuid 
 import re 
 import urllib.parse 
 import requests 
 import hashlib 
-import json 
 import shlex
 from bson import ObjectId 
 from app.db.connection import db 
@@ -15,8 +14,6 @@ from dotenv import load_dotenv
 load_dotenv()
 from app.services.render_helper import (
     find_background,
-    get_image_items,
-    get_text_items,    
 )
 # ---------------------------------------------------------
 # CONFIG
@@ -34,14 +31,6 @@ FONT_PATH = FONT_PATH.replace("\\", "/")
 PX_RE = re.compile(r"-?\d+(\.\d+)?")
 FONT_CACHE_DIR = os.path.join(MEDIA_ROOT, "font_cache")
 
-# ---------------------------------------------------------
-# HELPERS
-# ---------------------------------------------------------
-
-# Function to compute absolute media path
-# Converts relative paths to absolute paths based on MEDIA_ROOT
-# Raises ValueError for remote URLs
-# Logs input and resolved paths for debugging
 def abs_media_path(path: str) -> str:
     path = path.replace("\\", "/")
 
@@ -57,8 +46,6 @@ def abs_media_path(path: str) -> str:
     
     return full_path
 
-# Function to ensure a file exists at the given path
-# Raises FileNotFoundError if the file does not exist
 def ensure_file_exists(path: str):
     if not os.path.exists(path):
         raise FileNotFoundError(f"Media file not found: {path}")
@@ -77,11 +64,6 @@ def has_audio_stream(src: str) -> bool:
         return result.returncode == 0 and result.stdout.strip() != ""
     except Exception:
         return False
-
-# def replace_placeholders(text: str, customer: dict) -> str:
-#     for key, value in customer.items():
-#         text = text.replace(f"{{{{{key}}}}}", value)
-#     return text
 
 def replace_placeholders(text: str, context: dict) -> str:
     if not isinstance(text, str):
@@ -113,17 +95,7 @@ def replace_placeholders(text: str, context: dict) -> str:
         text = text.replace(f"{{{{{key}}}}}", str(value))
     return text
 
-
-
-# Function to parse position values
-# Handles strings with 'px' suffix and converts to float
-# Returns 0.0 for invalid values
 def parse_position(value):
-    """
-    Convert position value to float:
-    - Handles '123.45px', '-1375.5px', or numeric values
-    - Returns float
-    """
     if isinstance(value, str):
         value = value.strip().replace("px", "")
     try:
@@ -132,7 +104,6 @@ def parse_position(value):
         return 0.0
 
 def parse_px(value):
-    """Convert '123.45px' or '-1375.5px' to float/int"""
     if isinstance(value, str):
         return float(value.replace('px', ''))
     return float(value)
@@ -144,8 +115,6 @@ def ffmpeg_escape_path(path: str) -> str:
     # Windows-safe FFmpeg path
     return path.replace("\\", "/").replace(":", "\\:")
 
-# Function to escape text for FFmpeg compatibility
-# Escapes special characters like ':', '\', and '%'
 def ffmpeg_escape_text(text: str) -> str:
     return (
         text.replace("\\", "\\\\")
@@ -242,9 +211,6 @@ def download_font(font_url: str) -> str:
         f.write(resp.content)
     return font_path
 
-# Resolve font file paths
-# Download fonts from URLs or map common font names to local files
-# Fallback to Arial if no match is found
 def resolve_font_file(details: Dict[str, Any]) -> str:
     font_url = details.get("fontUrl") or details.get("fontURL")
     if font_url:
@@ -302,19 +268,6 @@ def resolve_font_file(details: Dict[str, Any]) -> str:
     return ""
 
 def compute_line_spacing(line_height, font_size):
-    """
-    Convert CSS-like line-height into FFmpeg line_spacing.
-
-    CSS:
-        1.2      -> multiplier
-        "60px"   -> pixel height
-        60       -> pixel height
-        "normal" -> default
-
-    FFmpeg:
-        line_spacing = extra pixels between lines
-    """
-
     if not line_height or line_height in ("normal", ""):
         return 0
 
@@ -436,11 +389,6 @@ def parse_shadow_string(value):
     return None
 
 def smart_logo_mapping(src: str, size: str = None) -> str:
-    """
-    Intelligently map dummy placeholder URLs to actual logo URLs based on size hints.
-    - 300x150 or small size -> customer.logo_url
-    - 400x200 or large size -> company.logo_url
-    """
     if not isinstance(src, str):
         return src
     
@@ -470,6 +418,17 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
 
     if context and isinstance(context, dict):
         raw_text = replace_placeholders(raw_text, context)
+
+    # ------------------------
+    # textTransform (uppercase / lowercase / capitalize)
+    # ------------------------
+    transform = str(details.get("textTransform", "none")).lower()
+    if transform == "uppercase":
+        raw_text = raw_text.upper()
+    elif transform == "lowercase":
+        raw_text = raw_text.lower()
+    elif transform in ("capitalize", "title"):
+        raw_text = raw_text.title()
     # ------------------------
     # TEXT SETTINGS
     # ------------------------
@@ -637,9 +596,6 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
     )
 
     return out_label, text_idx + 1
-# ---------------------------------------------------------
-# MAIN RENDER FUNCTION
-# ---------------------------------------------------------
 
 def generate_ffmpeg_cmd(template):
     design = template['template_json']['design']
@@ -724,10 +680,6 @@ def generate_ffmpeg_cmd(template):
     return " ".join(shlex.quote(c) for c in cmd)
 
 def parse_scale(transform_str: str) -> float:
-    """
-    Handles: 'scale(1)', 'scale(0.5, 0.5)', 'none'
-    Returns: float (default 1.0)
-    """
     if not transform_str or transform_str == "none":
         return 1.0
     try:
@@ -766,7 +718,6 @@ def to_even(value, min_value=2):
     return v
 
 def parse_px(value):
-    """Handles '123.45px', numeric values, and list-like strings"""
     if isinstance(value, str):
         # Kuch cases mein value '0.32, 0.32' bhi aa sakti hai transform error ki wajah se
         clean_val = value.replace('px', '').split(',')[0].strip()
@@ -777,7 +728,6 @@ def parse_px(value):
     return float(value) if value is not None else 0.0
 
 def safe_float(val):
-    """Handles '10px', '0.32, 0.32', and None values safely."""
     if val is None: return 0.0
     try:
         clean_val = str(val).replace("px", "").split(',')[0].strip()
@@ -786,92 +736,132 @@ def safe_float(val):
         return 0.0
     
 def render_image_preview(template_json, customer, company, output_path):
-    design = template_json["design"]
-    canvas_w = design["size"]["width"]
-    canvas_h = design["size"]["height"]
+    design = template_json.get("design", {}) if isinstance(template_json, dict) else {}
+    canvas_w, canvas_h = resolve_canvas_size(design)
 
     context = {
-        "customer": customer,
-        "company": company
+        "customer": customer or {},
+        "company": company or {},
     }
 
-    inputs = []
-    filters = []
+    track_items_map = design.get("trackItemsMap", {}) if isinstance(design, dict) else {}
+    track_item_ids = design.get("trackItemIds", []) if isinstance(design, dict) else []
+    ordered_ids = track_item_ids if track_item_ids else list(track_items_map.keys())
 
-    # ----------------------------------
-    # 1️⃣ Background
-    # ----------------------------------
-    bg = find_background(template_json)
+    # -----------------------------
+    # Collect background + images in order
+    # -----------------------------
+    bg_item = find_background(template_json)
+    if bg_item and bg_item.get("type") != "image":
+        # For image preview we do NOT support video background
+        bg_item = None
 
-    if bg:
-        bg_src = bg["details"]["src"]
-        inputs.append(bg_src)
-        filters.append(f"[0:v]scale={canvas_w}:{canvas_h}[base]")
-        last = "[base]"
+    inputs: list[str] = []
+    filter_parts: list[str] = []
+
+    current = "[base]"
+
+    if bg_item:
+        bg_src = smart_logo_mapping(bg_item.get("details", {}).get("src", ""))
+        bg_src = replace_placeholders(bg_src, context)
+        bg_src = normalize_media_src(bg_src)
+        if bg_src:
+            inputs.append(bg_src)
+            # Cover fill (like CSS background-size: cover)
+            filter_parts.append(
+                f"[0:v]scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=increase,"
+                f"crop={canvas_w}:{canvas_h}[base]"
+            )
+        else:
+            filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}[base]")
     else:
-        filters.append(f"color=c=transparent:s={canvas_w}x{canvas_h}[base]")
-        last = "[base]"
+        filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}[base]")
 
-    input_idx = 1
-
-    # ----------------------------------
-    # 2️⃣ Images (logo etc.)
-    # ----------------------------------
-    image_items = get_image_items(template_json)
-
-    for idx, img in enumerate(image_items):
-        src = img["details"]["src"]
-        x = int(float(img["details"].get("left", "0px").replace("px", "")))
-        y = int(float(img["details"].get("top", "0px").replace("px", "")))
-
-        inputs.append(src)
-
-        filters.append(
-            f"{last}[{input_idx}:v]overlay={x}:{y}[img{idx}]"
-        )
-
-        last = f"[img{idx}]"
-        input_idx += 1
-
-    # ----------------------------------
-    # 3️⃣ Text (INLINE — no add_text_filters)
-    # ----------------------------------
-    text_items = get_text_items(template_json)
-
-    for idx, item in enumerate(text_items):
-        raw_text = item["details"].get("text", "")
-        text = replace_placeholders(raw_text, context)
-
-        if not text:
+    # Image overlays (contain, positioned like editor)
+    overlay_idx = 0
+    for item_id in ordered_ids:
+        item = track_items_map.get(item_id, {})
+        if item.get("type") != "image":
+            continue
+        details = item.get("details", {})
+        if details.get("isBackground"):
             continue
 
-        x = int(float(item["details"].get("left", "0px").replace("px", "")))
-        y = int(float(item["details"].get("top", "0px").replace("px", "")))
-        font_size = int(item["details"].get("fontSize", 32))
-        color = item["details"].get("color", "#ffffff").replace("#", "")
-        font = item["details"].get("fontFamily", "Arial")
+        src = smart_logo_mapping(details.get("src", ""))
+        src = replace_placeholders(src, context)
+        src = normalize_media_src(src)
+        if not src:
+            continue
 
-        filters.append(
-            f"{last}drawtext=text='{text}':"
-            f"x={x}:y={y}:fontsize={font_size}:fontcolor={color}"
-            f"[txt{idx}]"
+        inputs.append(src)
+        in_idx = len(inputs) - 1  # actual input index in ffmpeg cmd
+
+        scale = parse_scale(details.get("transform", "scale(1)"))
+        orig_w = safe_float(details.get("width", canvas_w)) or canvas_w
+        orig_h = safe_float(details.get("height", canvas_h)) or canvas_h
+
+        tw = max(2, to_even(orig_w * scale))
+        th = max(2, to_even(orig_h * scale))
+
+        left = safe_float(details.get("left", 0)) + (orig_w - tw) / 2
+        top = safe_float(details.get("top", 0)) + (orig_h - th) / 2
+
+        opacity = safe_float(details.get("opacity", 100)) / 100.0
+        opacity_filter = ""
+        if opacity < 1.0:
+            opacity_filter = f",format=rgba,colorchannelmixer=aa={opacity:.3f}"
+
+        sc = f"[img_sc{overlay_idx}]"
+        ov = f"[img_ov{overlay_idx}]"
+        filter_parts.append(
+            f"[{in_idx}:v]scale={tw}:{th}:force_original_aspect_ratio=decrease{opacity_filter},setpts=PTS-STARTPTS{sc}"
+        )
+        filter_parts.append(
+            f"{current}{sc}overlay={left}:{top}{ov}"
+        )
+        current = ov
+        overlay_idx += 1
+
+    # -----------------------------
+    # Text overlays (use same text engine as video)
+    # Force visible at t=0
+    # -----------------------------
+    txt_idx = 0
+    duration = 1.0
+    for item_id in ordered_ids:
+        item = track_items_map.get(item_id, {})
+        if item.get("type") != "text":
+            continue
+        if not item.get("details", {}).get("text"):
+            continue
+        item = dict(item)
+        item["display"] = {"from": 0, "to": 1000}
+        current, txt_idx = add_text_item_filters(
+            filter_parts,
+            current,
+            item,
+            duration,
+            txt_idx,
+            context,
+            canvas_w=canvas_w,
+            canvas_h=canvas_h,
         )
 
-        last = f"[txt{idx}]"
-
-    # ----------------------------------
-    # 4️⃣ FFmpeg execution
-    # ----------------------------------
+    # -----------------------------
+    # FFmpeg execution (JPEG)
+    # -----------------------------
     cmd = ["ffmpeg", "-y"]
-
-    for i in inputs:
-        cmd += ["-i", i]
+    for src in inputs:
+        # Loop still images so they always have a frame at t=0
+        cmd += ["-loop", "1", "-i", src]
 
     cmd += [
-        "-filter_complex", ";".join(filters),
-        "-map", last,
+        "-filter_complex", ";".join(filter_parts),
+        "-map", current,
         "-frames:v", "1",
-        output_path
+        "-q:v", "2",
+        "-vcodec", "mjpeg",
+        output_path,
     ]
 
     subprocess.run(cmd, check=True)
@@ -939,7 +929,6 @@ def render_preview(template_json, context_data=None, output_path=None):
                 print(f"   → Smart mapped to: {src_got}")
             
             src = replace_placeholders(src_got, context)
-            print(f"   After placeholder: {src}")
             
             if not src:
                 print(f"   ⚠️ Skipping - no src after replacement")
@@ -1225,7 +1214,6 @@ def render_preview(template_json, context_data=None, output_path=None):
     ]
 
     subprocess.run(cmd, check=True)
-
 
 def render_video(task_id: str):
     task = db.video_tasks.find_one({"_id": ObjectId(task_id)})
