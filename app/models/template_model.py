@@ -13,9 +13,9 @@ class Template(BaseModel):
     type: Optional[str] = "video" # "image | video | festival | birthday"
     duration: float
     trim: Optional[dict]         # {start, end}
-
     template_json: dict         # full layers JSON (text, img, audio)
-
+    public: bool = True
     status: str = "active"
     created_at: datetime
     updated_at: datetime
+    

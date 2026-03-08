@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import auth, company, customer, admin, media, template, video_task, task, category
+from app.routes import auth, company, customer, admin, media, template, video_task, task, category, public
 from app.db.connection import db
 from app.utils.auth import hash_password
 import asyncio
@@ -13,6 +13,7 @@ app.mount("/media", StaticFiles(directory="media"), name="media")
 
 # ✅ CORS setup
 origins = [
+    "http://localhost:3000",
     "https://videoedittool-puce.vercel.app",
 ]
 
@@ -34,6 +35,7 @@ app.include_router(template.router)
 app.include_router(video_task.router)
 app.include_router(task.router)
 app.include_router(category.router)
+app.include_router(public.router)
 
 
 # ✅ Simple health check route
