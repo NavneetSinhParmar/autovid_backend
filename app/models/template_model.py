@@ -7,6 +7,7 @@ class Template(BaseModel):
     company_id: str
     template_name: str
     category: str
+    preview_image_url: Optional[str]
     base_video_url: Optional[str]
     base_image_url: Optional[str]
     base_audio_url: Optional[str]

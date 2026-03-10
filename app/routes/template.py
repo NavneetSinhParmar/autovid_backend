@@ -43,6 +43,7 @@ async def create_template(
         "company_id": str(company["_id"]),
         "template_name": data["template_name"],
         "category": data.get("category", "general"),
+        "preview_image_url": data.get("preview_image_url"),
         "base_video_url": data.get("base_video_url"),
         "base_image_url": data.get("base_image_url"),
         "base_audio_url": data.get("base_audio_url"),

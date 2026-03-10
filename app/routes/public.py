@@ -12,6 +12,7 @@ def _serialize_template(t: dict) -> dict:
         "category": t.get("category"),
         "type": t.get("type"),
         "duration": t.get("duration"),
+        "preview_image_url": t.get("preview_image_url"),
         "base_video_url": t.get("base_video_url"),
         "base_image_url": t.get("base_image_url"),
         "base_audio_url": t.get("base_audio_url"),
