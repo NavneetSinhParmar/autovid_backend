@@ -12,20 +12,16 @@ import uuid
 import os 
 router = APIRouter(prefix="/templates", tags=["Templates"])
 
-
 # ================= CREATE TEMPLATE =================
 @router.post("/")
 async def create_template(
     data: dict,
     user=Depends(require_roles("company"))
 ):
-    print("User creating template:", user)
 
     company = await db.companies.find_one({
         "user_id": str(user["_id"])
     })
-
-    print("Creating template for company:", company)
 
     if not company:
         raise HTTPException(400, "Company not found")
@@ -44,6 +40,7 @@ async def create_template(
         "company_id": str(company["_id"]),
         "template_name": data["template_name"],
         "category": data.get("category", "general"),
+        "preview_image_url": data.get("preview_image_url"),
         "base_video_url": data.get("base_video_url"),
         "base_image_url": data.get("base_image_url"),
         "base_audio_url": data.get("base_audio_url"),
@@ -51,6 +48,7 @@ async def create_template(
         "trim": data.get("trim"),
         "template_json": template_json,
         "type": data.get("type", "video"),
+        "public": data.get("public", True),
         "status": "active",
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
@@ -62,7 +60,6 @@ async def create_template(
         "message": "Template created successfully",
         "template_id": str(result.inserted_id)
     }
-
 
 # ================= LIST TEMPLATES =================
 @router.get("/")
@@ -83,7 +80,6 @@ async def list_templates(user=Depends(require_roles("company"))):
 
     return {"templates": templates}
 
-
 # ================= GET TEMPLATE =================
 @router.get("/{template_id}")
 async def get_template(template_id: str):
@@ -101,7 +97,6 @@ async def get_template(template_id: str):
 
     return {"template": template}
 
-
 # ================= UPDATE TEMPLATE (PATCH) =================
 @router.patch("/{template_id}")
 async def update_template(
@@ -115,7 +110,6 @@ async def update_template(
     )
 
     return {"message": "Template updated successfully"}
-
 
 # ================= DELETE TEMPLATE =================
 @router.delete("/{template_id}")
@@ -199,21 +193,6 @@ def get_nested_value(data: dict, path: str):
     except Exception:
         return ""
 
-# def replace_placeholders(template_json: dict, customer: dict) -> dict:
-#     template_str = json.dumps(template_json)
-
-#     replacements = {
-#         "{{customer_company_name}}": customer.get("customer_company_name", ""),
-#         "{{full_name}}": customer.get("full_name", ""),
-#         "{{city}}": customer.get("city", ""),
-#         "{{phone_number}}": customer.get("phone_number", "")
-#     }
-
-#     for key, value in replacements.items():
-#         template_str = template_str.replace(key, value)
-
-#     return json.loads(template_str)
-
 def replace_placeholders(data, customer):
     # Pure JSON object ko string bana kar replace karna sabse safe hai
     json_str = json.dumps(data)
@@ -222,7 +201,6 @@ def replace_placeholders(data, customer):
         placeholder = "{{" + str(key) + "}}"
         json_str = json_str.replace(placeholder, str(value))
     return json.loads(json_str)
-
 
 def normalize_customer(customer: dict) -> dict:
     safe = {}

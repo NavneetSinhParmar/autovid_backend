@@ -855,16 +855,30 @@ def render_image_preview(template_json, customer, company, output_path):
         # Loop still images so they always have a frame at t=0
         cmd += ["-loop", "1", "-i", src]
 
+    # Ensure the output path uses forward slashes (ffmpeg on Windows can be picky)
+    output_path = str(output_path).replace("\\", "/")
+
+    # Force image2 muxer and single frame output
     cmd += [
         "-filter_complex", ";".join(filter_parts),
         "-map", current,
         "-frames:v", "1",
         "-q:v", "2",
         "-vcodec", "mjpeg",
+        "-f", "image2",
         output_path,
     ]
 
+    # Debug: print ffmpeg command
+    try:
+        print("Render image FFmpeg command:", " ".join(shlex.quote(c) for c in cmd))
+    except Exception:
+        print("Render image FFmpeg command:", cmd)
+
     subprocess.run(cmd, check=True)
+
+    # Return the executed command string for debugging
+    return " ".join(shlex.quote(c) for c in cmd)
 
 def render_preview(template_json, context_data=None, output_path=None):
     if output_path is None and isinstance(context_data, str):
@@ -1212,8 +1226,15 @@ def render_preview(template_json, context_data=None, output_path=None):
         "-t", str(duration),
         output_path
     ]
+    # Debug: print ffmpeg command
+    try:
+        print("Render video FFmpeg command:", " ".join(shlex.quote(c) for c in cmd))
+    except Exception:
+        print("Render video FFmpeg command:", cmd)
 
     subprocess.run(cmd, check=True)
+
+    return " ".join(shlex.quote(c) for c in cmd)
 
 def render_video(task_id: str):
     task = db.video_tasks.find_one({"_id": ObjectId(task_id)})
