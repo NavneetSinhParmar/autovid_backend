@@ -18,13 +18,10 @@ async def create_template(
     data: dict,
     user=Depends(require_roles("company"))
 ):
-    print("User creating template:", user)
 
     company = await db.companies.find_one({
         "user_id": str(user["_id"])
     })
-
-    print("Creating template for company:", company)
 
     if not company:
         raise HTTPException(400, "Company not found")

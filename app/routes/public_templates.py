@@ -47,7 +47,6 @@ async def public_preview(template_id: str, data: dict):
         raise HTTPException(status_code=404, detail="Template not available")
 
     customer = normalize_customer(data.get("customer", {}))
-    # fields: simple key->value mapping used to replace text items
     fields = data.get("fields", {}) or {}
 
     company = None
@@ -69,11 +68,13 @@ async def public_preview(template_id: str, data: dict):
         filename = f"{template_id}_public_preview.jpg"
         preview_path = os.path.join(media_dir, filename)
 
-        # Apply field replacements into a copy of template_json
         tpl_json = deepcopy(template.get("template_json", {}))
-        replacements = _apply_fields_to_template(tpl_json, fields, customer, company)
-        
-        ffmpeg_cmd = await run_in_threadpool(
+
+        replacements = _apply_fields_to_template(
+            tpl_json, fields, customer, company
+        )
+
+        await run_in_threadpool(
             render_image_preview,
             tpl_json,
             customer,
@@ -81,33 +82,26 @@ async def public_preview(template_id: str, data: dict):
             preview_path
         )
 
-        # If caller requested download explicitly, stream the file. Otherwise return JSON with updated template
-        if data.get("download"):
-            return FileResponse(
-                preview_path,
-                media_type="image/jpeg",
-                filename=filename
-            )
-        return {
-            "preview_path": preview_path,
-            "filename": filename,
-            "template_json": tpl_json,
-            "preview_mode": "image",
-            "ffmpeg_cmd": ffmpeg_cmd,
-        }
+        return FileResponse(
+            preview_path,
+            media_type="image/jpeg",
+            filename=filename
+        )
 
     # VIDEO TEMPLATE
     filename = f"{template_id}_public_preview.mp4"
     preview_path = os.path.join(media_dir, filename)
 
-    # VIDEO TEMPLATE: apply fields to a copy of the template and render
     full_template = deepcopy(template)
+
     tpl_json = full_template.get("template_json", {}) or {}
-    replacements = _apply_fields_to_template(tpl_json, fields, customer, company)
+    replacements = _apply_fields_to_template(
+        tpl_json, fields, customer, company
+    )
+
     full_template["template_json"] = tpl_json
 
-
-    ffmpeg_cmd = await run_in_threadpool(
+    await run_in_threadpool(
         render_preview,
         full_template,
         {
@@ -117,21 +111,96 @@ async def public_preview(template_id: str, data: dict):
         preview_path
     )
 
-    if data.get("download"):
-        return FileResponse(
-            preview_path,
-            media_type="video/mp4",
-            filename=filename
-        )
     return {
         "preview_path": preview_path,
         "filename": filename,
-        "template_json": tpl_json,
         "replacements": replacements,
-        "preview_mode": "video",
-        "ffmpeg_cmd": ffmpeg_cmd,
+        "preview_mode": "video"
     }
 
+@router.post("/{template_id}/download")
+async def public_download(template_id: str, data: dict):
+
+    template = await db.templates.find_one({
+        "_id": ObjectId(template_id),
+        "public": True,
+        "status": "active"
+    })
+
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not available")
+
+    customer = normalize_customer(data.get("customer", {}))
+    fields = data.get("fields", {}) or {}
+
+    company = None
+    company_id = template.get("company_id")
+
+    if company_id:
+        company = await db.companies.find_one({"_id": ObjectId(company_id)})
+
+    company = normalize_company(company)
+
+    media_dir = os.path.abspath("media")
+    os.makedirs(media_dir, exist_ok=True)
+
+    template_type = str(template.get("type", "video")).lower()
+
+    # IMAGE
+    if template_type in ("img", "image"):
+
+        filename = f"{template_id}_download.jpg"
+        preview_path = os.path.join(media_dir, filename)
+
+        tpl_json = deepcopy(template.get("template_json", {}))
+
+        _apply_fields_to_template(
+            tpl_json, fields, customer, company
+        )
+
+        await run_in_threadpool(
+            render_image_preview,
+            tpl_json,
+            customer,
+            company,
+            preview_path
+        )
+
+        return FileResponse(
+            preview_path,
+            media_type="image/jpeg",
+            filename=filename
+        )
+
+    # VIDEO
+    filename = f"{template_id}_download.mp4"
+    preview_path = os.path.join(media_dir, filename)
+
+    full_template = deepcopy(template)
+
+    tpl_json = full_template.get("template_json", {}) or {}
+
+    _apply_fields_to_template(
+        tpl_json, fields, customer, company
+    )
+
+    full_template["template_json"] = tpl_json
+
+    await run_in_threadpool(
+        render_preview,
+        full_template,
+        {
+            "customer": customer,
+            "company": company
+        },
+        preview_path
+    )
+
+    return FileResponse(
+        preview_path,
+        media_type="video/mp4",
+        filename=filename
+    )
 
 def _get_field_value(fields: dict, path: str):
     if not path or not isinstance(fields, dict):
@@ -156,7 +225,6 @@ def _get_field_value(fields: dict, path: str):
             return None
         cur = val
     return cur
-
 
 def _apply_fields_to_template(
     template_json: dict,
