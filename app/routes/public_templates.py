@@ -72,10 +72,8 @@ async def public_preview(template_id: str, data: dict):
         # Apply field replacements into a copy of template_json
         tpl_json = deepcopy(template.get("template_json", {}))
         replacements = _apply_fields_to_template(tpl_json, fields, customer, company)
-        print(f"Public preview replacements: {replacements}")
-        print("Applied fields to template JSON for image preview: ", tpl_json)  
         
-        await run_in_threadpool(
+        ffmpeg_cmd = await run_in_threadpool(
             render_image_preview,
             tpl_json,
             customer,
@@ -94,6 +92,8 @@ async def public_preview(template_id: str, data: dict):
             "preview_path": preview_path,
             "filename": filename,
             "template_json": tpl_json,
+            "preview_mode": "image",
+            "ffmpeg_cmd": ffmpeg_cmd,
         }
 
     # VIDEO TEMPLATE
@@ -104,11 +104,10 @@ async def public_preview(template_id: str, data: dict):
     full_template = deepcopy(template)
     tpl_json = full_template.get("template_json", {}) or {}
     replacements = _apply_fields_to_template(tpl_json, fields, customer, company)
-    print(f"Public preview replacements: {replacements}")
     full_template["template_json"] = tpl_json
 
 
-    await run_in_threadpool(
+    ffmpeg_cmd = await run_in_threadpool(
         render_preview,
         full_template,
         {
@@ -129,6 +128,8 @@ async def public_preview(template_id: str, data: dict):
         "filename": filename,
         "template_json": tpl_json,
         "replacements": replacements,
+        "preview_mode": "video",
+        "ffmpeg_cmd": ffmpeg_cmd,
     }
 
 
@@ -157,74 +158,89 @@ def _get_field_value(fields: dict, path: str):
     return cur
 
 
-def _apply_fields_to_template(template_json: dict, fields: dict, customer: dict | None = None, company: dict | None = None):
+def _apply_fields_to_template(
+    template_json: dict,
+    fields: dict,
+    customer: dict | None = None,
+    company: dict | None = None
+):
     if not isinstance(template_json, dict):
-        return
-    design = template_json.get("design") if isinstance(template_json.get("design"), dict) else {}
-    track_map = design.get("trackItemsMap") if isinstance(design.get("trackItemsMap"), dict) else {}
+        return []
+
+    design = template_json.get("design", {})
+    track_map = design.get("trackItemsMap", {})
 
     replacements = []
-    for tid, item in list(track_map.items()):
+
+    for tid, item in track_map.items():
         try:
             if not isinstance(item, dict):
                 continue
+
             if item.get("type") != "text":
                 continue
-            metadata = item.get("metadata") or {}
-            is_customer_field = metadata.get("isCustomerField")
-            # Accept truthy values and strings like "true"
-            if isinstance(is_customer_field, str):
-                is_customer_field = is_customer_field.lower() in ("1", "true", "yes")
-            if not is_customer_field:
-                continue
-            field_path = metadata.get("fieldPath") or metadata.get("fieldpath")
-            if not field_path:
-                continue
-            # Normalize field_path like '{{customer.name}}' -> 'customer.name'
-            fp = str(field_path).strip()
-            if fp.startswith("{{") and fp.endswith("}}"):
-                fp = fp[2:-2].strip()
 
-            value = _get_field_value(fields, fp)
-            # fallback: if not found in fields, try customer/company dicts
-            if value is None and isinstance(customer, dict):
-                # if fp starts with 'customer.' use that path
-                if fp.startswith("customer."):
-                    subpath = fp.split('.', 1)[1]
-                    value = _get_field_value(customer, subpath)
-                else:
-                    # try direct key lookup in customer (case-insensitive)
-                    for k, v in customer.items():
-                        if str(k).lower() == str(fp).lower():
-                            value = v
-                            break
-            if value is None and isinstance(company, dict):
-                if fp.startswith("company."):
-                    subpath = fp.split('.', 1)[1]
-                    value = _get_field_value(company, subpath)
-                else:
-                    for k, v in company.items():
-                        if str(k).lower() == str(fp).lower():
-                            value = v
-                            break
-            if value is None:
-                # no matching key in request fields
+            metadata = item.get("metadata", {})
+
+            # Only process dynamic fields
+            if not metadata.get("isCustomerField"):
                 continue
-            # set value as string into details.text
-            details = item.get("details") or {}
+
+            field_path = metadata.get("fieldPath") or metadata.get("fieldpath")
+            field_label = metadata.get("fieldLabel")
+
+            value = None
+
+            # 1️⃣ Try fieldPath
+            if field_path:
+                fp = str(field_path).strip()
+
+                if fp.startswith("{{") and fp.endswith("}}"):
+                    fp = fp[2:-2].strip()
+
+                value = _get_field_value(fields, fp)
+
+            # 2️⃣ Try fieldLabel
+            if value is None and field_label:
+                for k, v in fields.items():
+                    if str(k).lower() == str(field_label).lower():
+                        value = v
+                        break
+
+            # 3️⃣ Try customer data
+            if value is None and isinstance(customer, dict):
+                for k, v in customer.items():
+                    if str(k).lower() == str(field_label).lower():
+                        value = v
+                        break
+
+            # 4️⃣ Try company data
+            if value is None and isinstance(company, dict):
+                for k, v in company.items():
+                    if str(k).lower() == str(field_label).lower():
+                        value = v
+                        break
+
+            if value is None:
+                continue
+
+            details = item.get("details", {})
             old = details.get("text")
+
             details["text"] = str(value)
-            # put back
             item["details"] = details
             track_map[tid] = item
-            try:
-                replacements.append({"id": tid, "old": old, "new": str(value)})
-            except Exception:
-                replacements.append({"id": tid, "old": old, "new": None})
+
+            replacements.append({
+                "id": tid,
+                "old": old,
+                "new": str(value)
+            })
+
         except Exception:
             continue
-    # assign back
-    if design:
-        design["trackItemsMap"] = track_map
-        template_json["design"] = design
+
+    design["trackItemsMap"] = track_map
+    template_json["design"] = design
+
     return replacements
