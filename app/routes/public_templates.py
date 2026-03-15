@@ -245,9 +245,6 @@ def _apply_fields_to_template(
             if not isinstance(item, dict):
                 continue
 
-            if item.get("type") != "text":
-                continue
-
             metadata = item.get("metadata", {})
 
             # Only process dynamic fields
@@ -293,17 +290,38 @@ def _apply_fields_to_template(
                 continue
 
             details = item.get("details", {})
-            old = details.get("text")
 
-            details["text"] = str(value)
-            item["details"] = details
-            track_map[tid] = item
+            # TEXT replacement (existing behavior)
+            if item.get("type") == "text":
+                old = details.get("text")
+                details["text"] = str(value)
+                item["details"] = details
+                track_map[tid] = item
+                replacements.append({
+                    "id": tid,
+                    "old": old,
+                    "new": str(value)
+                })
+                continue
 
-            replacements.append({
-                "id": tid,
-                "old": old,
-                "new": str(value)
-            })
+            # MEDIA replacement: replace common keys that hold file paths/urls
+            old_vals = {}
+            replaced = False
+            for k, v in list(details.items()):
+                lk = str(k).lower()
+                if any(sub in lk for sub in ("url", "src", "file", "path", "poster", "image", "video")):
+                    old_vals[k] = v
+                    details[k] = str(value)
+                    replaced = True
+
+            if replaced:
+                item["details"] = details
+                track_map[tid] = item
+                replacements.append({
+                    "id": tid,
+                    "old": old_vals,
+                    "new": str(value)
+                })
 
         except Exception:
             continue
