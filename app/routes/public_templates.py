@@ -111,12 +111,12 @@ async def public_preview(template_id: str, data: dict):
         preview_path
     )
 
-    return {
-        "preview_path": preview_path,
-        "filename": filename,
-        "replacements": replacements,
-        "preview_mode": "video"
-    }
+    # Return the generated file directly so clients receive a usable URL/file
+    return FileResponse(
+        preview_path,
+        media_type="video/mp4",
+        filename=filename
+    )
 
 @router.post("/{template_id}/download")
 async def public_download(template_id: str, data: dict):
