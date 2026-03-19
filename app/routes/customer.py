@@ -16,9 +16,24 @@ from app.services.storage import save_customer_file
 from app.services.url import build_media_url
 from fastapi import Request
 from app.services.storage import save_upload_file
+import random
+from pymongo.errors import DuplicateKeyError
 
 router = APIRouter(prefix="/customer", tags=["Customer Management"])
 print("Customer router loaded")
+
+async def generate_distributed_id() -> str:
+    """
+    Generate a globally-unique 8-digit numeric distributed_id for customer login.
+    """
+    for _ in range(50):
+        candidate = str(random.randint(10_000_000, 99_999_999))
+        # distributed_id is used as `users.username` too, so ensure uniqueness across both collections.
+        exists_customer = await db.customers.find_one({"distributed_id": candidate})
+        exists_user = await db.users.find_one({"username": candidate})
+        if not exists_customer and not exists_user:
+            return candidate
+    raise HTTPException(status_code=500, detail="Unable to generate distributed_id")
 
 def validate_image_file(file: UploadFile):
     allowed_extensions = (".png", ".jpg", ".jpeg")
@@ -139,7 +154,7 @@ async def bulk_upload_customers(
 
         for row_data in rows_data:
 
-            if not any(row_data.get(f) for f in ["username", "email", "password", "full_name"]):
+            if not any(row_data.get(f) for f in ["password", "full_name", "distributed_id"]):
                 row_num += 1
                 continue
 
@@ -200,8 +215,8 @@ async def bulk_upload_customers(
                             print(f"Logo not uploaded: {logo_filename}")
 
                 customer_data = {
-                    "username": str(row_data.get("username")).strip(),
-                    "email": str(row_data.get("email")).strip(),
+                    "distributed_id": str(row_data.get("distributed_id") or "").strip() or None,
+                    "email": str(row_data.get("email") or "").strip() or None,
                     "password": str(row_data.get("password")).strip(),
                     "full_name": str(row_data.get("full_name")).strip(),
                     "customer_company_name": row_data.get("customer_company_name"),
@@ -264,7 +279,7 @@ async def create_single_customer(data: Dict[str, Any], user: Dict):
         # -----------------------------
         # ✅ REQUIRED FIELD VALIDATION
         # -----------------------------
-        required_fields = ["username", "email", "password", "full_name"]
+        required_fields = ["password", "full_name"]
 
         for field in required_fields:
             if not data.get(field):
@@ -290,20 +305,47 @@ async def create_single_customer(data: Dict[str, Any], user: Dict):
                 )
 
         # -----------------------------
-        # DUPLICATE CHECK
+        # distributed_id (login id) generation + uniqueness
         # -----------------------------
-        if await db.users.find_one({"username": data["username"]}):
-            raise HTTPException(400, "Username already exists")
+        distributed_id = str(data.get("distributed_id") or "").strip()
+        if distributed_id:
+            if not distributed_id.isdigit() or len(distributed_id) != 8:
+                raise HTTPException(status_code=400, detail="distributed_id must be exactly 8 digits")
+            if await db.customers.find_one({"distributed_id": distributed_id}):
+                raise HTTPException(status_code=400, detail="distributed_id already exists")
+        else:
+            distributed_id = await generate_distributed_id()
 
-        if await db.users.find_one({"email": data["email"]}):
-            raise HTTPException(400, "Email already exists")
+        # ------------------------------------------------------------
+        # Email rules:
+        # - Same email is allowed across different companies
+        # - Same email is NOT allowed inside the SAME company
+        #
+        # We enforce this on `customers` using (linked_company_id + email).
+        # For the linked `users` record we generate a deterministic unique email
+        # from distributed_id to avoid breaking existing DB constraints.
+        # ------------------------------------------------------------
+        customer_email = str(data.get("email") or "").strip().lower() or None
+
+        if customer_email:
+            company_oid = to_oid(data["linked_company_id"])
+            exists_in_company = await db.customers.find_one(
+                {"linked_company_id": company_oid, "email": customer_email}
+            )
+            if exists_in_company:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Email already exists in this company",
+                )
+
+        user_email = f"{distributed_id}@autovid.local"
 
         # -----------------------------
         # CREATE USER
         # -----------------------------
         user_doc = {
-            "username": data["username"],
-            "email": data["email"],
+            "username": distributed_id,
+            "email": user_email,
             "password": hash_password(data["password"]),
             "role": "customer",
             "status": "active",
@@ -311,15 +353,21 @@ async def create_single_customer(data: Dict[str, Any], user: Dict):
             "updated_at": datetime.utcnow(),
         }
 
-        inserted_user = await db.users.insert_one(user_doc)
+        try:
+            inserted_user = await db.users.insert_one(user_doc)
+        except DuplicateKeyError:
+            # Should not happen because distributed_id is globally unique
+            raise HTTPException(status_code=400, detail="User already exists")
         user_id = inserted_user.inserted_id
 
         # -----------------------------
         # CREATE CUSTOMER
         # -----------------------------
         customer_doc = {
+            "distributed_id": distributed_id,
             "customer_company_name": data.get("customer_company_name"),
             "full_name": data["full_name"],
+            "email": customer_email,
             "logo_url": data.get("logo_url"),
             "city": data.get("city"),
             "phone_number": data.get("phone_number"),
@@ -339,6 +387,7 @@ async def create_single_customer(data: Dict[str, Any], user: Dict):
             "message": "Customer created successfully",
             "customer_id": str(inserted.inserted_id),
             "user_id": str(user_id),
+            "distributed_id": distributed_id,
         }
 
     except HTTPException:
@@ -418,7 +467,7 @@ async def create_customer_handler(
         if logo_file:
             validate_image_file(logo_file)
             
-            path, _ = await save_customer_file(logo_file,company_id, data.get("username"))
+            path, _ = await save_customer_file(logo_file, company_id, data.get("distributed_id") or "customer")
             data["logo_url"] = path
             print("Logo saved at:", path)
         return await create_single_customer(data, user)
