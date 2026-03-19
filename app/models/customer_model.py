@@ -6,6 +6,8 @@ class CustomerCreate(BaseModel):
     # Customer profile
     customer_company_name: Optional[str] = None
     full_name: str
+    email: Optional[str] = None
+    distributed_id: Optional[str] = None
     logo_url: Optional[str] = None
     city: Optional[str] = None
     phone_number: Optional[str] = None
@@ -14,8 +16,8 @@ class CustomerCreate(BaseModel):
     customer_category: Optional[str] = None
     
     # Relationships
-    linked_company_id: Optional[str] = None 
-    user_id: str     
+    linked_company_id: Optional[str] = None
+    user_id: Optional[str] = None
     
     status: Optional[str] = "active"
 
@@ -24,6 +26,8 @@ class CustomerOut(BaseModel):
     id: str
     customer_company_name: Optional[str]
     full_name: str
+    email: Optional[str] = None
+    distributed_id: Optional[str] = None
     logo_url: Optional[str]
     city: Optional[str]
     phone_number: Optional[str]
