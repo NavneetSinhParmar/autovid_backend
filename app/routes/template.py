@@ -1,5 +1,6 @@
 import re
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi import Query
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from datetime import datetime
@@ -79,6 +80,36 @@ async def list_templates(user=Depends(require_roles("company"))):
         del t["_id"]
 
     return {"templates": templates}
+
+
+@router.get("/")
+async def get_template(
+    company_id: str = Query(None),
+    template_name: str = Query(None),
+    category: str = Query(None),
+    type: str = Query(None)
+):
+
+    query = {"status": "active"}
+    if company_id:
+        query["company_id"] = company_id
+    if template_name:
+        query["template_name"] = template_name
+    if category:
+        query["category"] = category
+    if type:
+        query["type"] = type
+    
+
+    template = await db.templates.find_one(query)
+
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    template["id"] = str(template["_id"])
+    del template["_id"]
+
+    return {"template": template}
 
 # ================= GET TEMPLATE =================
 @router.get("/{template_id}")
