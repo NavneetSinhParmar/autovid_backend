@@ -19,4 +19,6 @@ class Template(BaseModel):
     status: str = "active"
     created_at: datetime
     updated_at: datetime
+    public_download_count: int = 0
+    private_download_count: int = 0
     
