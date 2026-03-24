@@ -6,10 +6,7 @@ class BulkTask(BaseModel):
     id: str
     template_id: str
     company_id: str
-
     total_customers: int
     completed_count: int = 0
-
-    status: str          # pending / processing / completed
-
+    status: str  
     created_at: datetime

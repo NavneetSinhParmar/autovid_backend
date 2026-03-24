@@ -7,7 +7,7 @@ class CompanyCreate(BaseModel):
     description: Optional[str] = None
     mobile: str
     logo_url: Optional[str] = None
-    user_id: str                     # FK to User table
+    user_id: str 
     status: Optional[str] = "active"
     visibility: str = "private" 
 
@@ -21,6 +21,5 @@ class CompanyOut(BaseModel):
     user_id: str
     status: str
     visibility: str
-    
     created_at: datetime
     updated_at: datetime
