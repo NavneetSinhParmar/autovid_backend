@@ -6,7 +6,7 @@ class CategoryCreate(BaseModel):
     name: str
     description: Optional[str] = None
     status: str = "active"
-    company_id: Optional[str] = None  # required for superadmin POST
+    company_id: Optional[str] = None 
 
 class CategoryUpdate(BaseModel):
     name: Optional[str] = None
@@ -18,10 +18,9 @@ class CategoryOut(BaseModel):
     name: str
     description: Optional[str] = None
     status: str
-    company_id: str                   # ← this was likely missing
+    company_id: str              
     created_at: datetime
     updated_at: datetime
 
     class Config:
-        populate_by_name = True       # Pydantic v2
-        # orm_mode = True             # use this instead if Pydantic v1
+        populate_by_name = True   

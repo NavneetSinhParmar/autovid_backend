@@ -678,25 +678,6 @@ async def update_customer(
         "updated_fields": list(update_data.keys())
     }
 
-'''@router.patch("/{customer_id}")
-async def update_customer(customer_id: str, data: Dict, 
-                          user=Depends(require_roles("superadmin", "company"))):
-
-    data["updated_at"] = datetime.utcnow()
-
-    # Can't manually change user_id
-    data.pop("user_id", None)
-
-    result = await db.customers.update_one(
-        {"_id": to_oid(customer_id)},
-        {"$set": data},
-    )
-
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Customer not found")
-
-    return {"message": "Customer updated successfully"}'''
-
 # --------------------------------------------------------
 # 🔴 DELETE CUSTOMER + LINKED USER
 # --------------------------------------------------------

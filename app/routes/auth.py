@@ -12,8 +12,8 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 class ResetPasswordRequest(BaseModel):
-    user_id: str = None              # whose password you want to change
-    old_password: str = None   # optional for superadmin
+    user_id: str = None
+    old_password: str = None
     new_password: str
 
 

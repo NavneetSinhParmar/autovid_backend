@@ -1,14 +1,22 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from bson import ObjectId
+from datetime import datetime
 import os
+from pymongo import ReturnDocument
 
 from app.db.connection import db
 from app.services.video_renderer import render_preview, render_image_preview
 from copy import deepcopy
 
 router = APIRouter(prefix="/public/templates", tags=["Public Templates"])
+
+
+def _template_oid(template_id: str) -> ObjectId:
+    if not ObjectId.is_valid(template_id):
+        raise HTTPException(status_code=400, detail="Invalid template id")
+    return ObjectId(template_id)
 
 
 def normalize_customer(customer: dict) -> dict:
@@ -201,6 +209,112 @@ async def public_download(template_id: str, data: dict):
         media_type="video/mp4",
         filename=filename
     )
+
+@router.patch("/{template_id}/increment-download")
+async def increment_download_counts(
+    template_id: str,
+    body: dict = Body(default_factory=dict),
+):
+    """
+    Increment download counters on the templates document.
+
+    Body (all optional):
+      - public: bool — if true, +1 public_download_count
+      - private: bool — if true, +1 private_download_count
+      - increment_public / increment_private — aliases for the booleans
+
+    If body is empty {}, both counters are incremented by 1.
+    """
+    oid = _template_oid(template_id)
+
+    if not body:
+        do_pub, do_prv = True, True
+    else:
+        pub = body.get("public", body.get("increment_public", False))
+        prv = body.get("private", body.get("increment_private", False))
+        do_pub = bool(pub)
+        do_prv = bool(prv)
+        if not do_pub and not do_prv:
+            raise HTTPException(
+                status_code=400,
+                detail="Set public and/or private to true, or send an empty body to increment both",
+            )
+
+    inc: dict = {}
+    if do_pub:
+        inc["public_download_count"] = 1
+    if do_prv:
+        inc["private_download_count"] = 1
+
+    updated = await db.templates.find_one_and_update(
+        {"_id": oid, "status": "active"},
+        {"$inc": inc, "$set": {"updated_at": datetime.utcnow()}},
+        return_document=ReturnDocument.AFTER,
+    )
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    return {
+        "message": "Download counts updated",
+        "template_id": template_id,
+        "public_download_count": int(updated.get("public_download_count") or 0),
+        "private_download_count": int(updated.get("private_download_count") or 0),
+    }
+
+
+@router.patch("/{template_id}/increment-download/public")
+async def increment_public_download(template_id: str):
+    """+1 public_download_count; template must be active and public."""
+    oid = _template_oid(template_id)
+
+    updated = await db.templates.find_one_and_update(
+        {"_id": oid, "status": "active", "public": True},
+        {
+            "$inc": {"public_download_count": 1},
+            "$set": {"updated_at": datetime.utcnow()},
+        },
+        return_document=ReturnDocument.AFTER,
+    )
+
+    if not updated:
+        raise HTTPException(
+            status_code=404,
+            detail="Template not found or not a public active template",
+        )
+
+    return {
+        "message": "Public download count incremented",
+        "template_id": template_id,
+        "public_download_count": int(updated.get("public_download_count") or 0),
+        "private_download_count": int(updated.get("private_download_count") or 0),
+    }
+
+
+@router.patch("/{template_id}/increment-download/private")
+async def increment_private_download(template_id: str):
+    """+1 private_download_count; template must be active."""
+    oid = _template_oid(template_id)
+
+    updated = await db.templates.find_one_and_update(
+        {"_id": oid, "status": "active"},
+        {
+            "$inc": {"private_download_count": 1},
+            "$set": {"updated_at": datetime.utcnow()},
+        },
+        return_document=ReturnDocument.AFTER,
+    )
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    return {
+        "message": "Private download count incremented",
+        "template_id": template_id,
+        "public_download_count": int(updated.get("public_download_count") or 0),
+        "private_download_count": int(updated.get("private_download_count") or 0),
+    }
+
 
 def _get_field_value(fields: dict, path: str):
     if not path or not isinstance(fields, dict):
