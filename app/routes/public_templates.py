@@ -202,6 +202,40 @@ async def public_download(template_id: str, data: dict):
         filename=filename
     )
 
+@router.post("/{template_id}/increment-download/public")
+async def increment_public_download(template_id: str):
+    template = await db.templates.find_one({"_id": ObjectId(template_id), "status": "active"})
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    await db.templates.update_one(
+        {"_id": ObjectId(template_id)},
+        {"$inc": {"public_download_count": 1}}
+    )
+
+    return {
+        "message": "Public download count incremented",
+        "template_id": template_id,
+        "public_download_count": template.get("public_download_count", 0) + 1
+    }
+
+@router.post("/{template_id}/increment-download/private")
+async def increment_private_download(template_id: str):
+    template = await db.templates.find_one({"_id": ObjectId(template_id), "status": "active"})
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    await db.templates.update_one(
+        {"_id": ObjectId(template_id)},
+        {"$inc": {"private_download_count": 1}}
+    )
+
+    return {
+        "message": "Private download count incremented",
+        "template_id": template_id,
+        "private_download_count": template.get("private_download_count", 0) + 1
+    }
+
 def _get_field_value(fields: dict, path: str):
     if not path or not isinstance(fields, dict):
         return None
