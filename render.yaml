@@ -1,28 +1,31 @@
 services:
   - type: web
-    name: autovid-app
-    env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python main.py"
+    name: autovid-api
+    runtime: python
+    plan: free
+
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+
+    startCommand: |
+      uvicorn main:app --host 0.0.0.0 --port $PORT
 
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+
+      - key: BASE_URL
+        value: https://autovid-backend-1.onrender.com
+
       - key: MONGO_URL
-        value: mongodb+srv://workfreetime16_db_user:F9rDVDAkg1hxHhLf@videotool.48plra6.mongodb.net/autovid_db?retryWrites=true&w=majority&appName=videotool
+        sync: false
 
       - key: DATABASE_NAME
         value: autovid_db
 
       - key: SECRET_KEY
-        value: 9f3c8e7a2b1d4c6f8a9e0b2d3c4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2
-
-      - key: ALGORITHM
-        value: HS256
+        generateValue: true
 
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
-        value: "10080"
-
-      - key: DEBUG
-        value: "TRUE"
-
-      - key: MEDIA_ROOT
-        value: media
+        value: "60"
