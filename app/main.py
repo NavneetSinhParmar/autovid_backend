@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 import os
 
 
+
 # ✅ Create app instance only once
 app = FastAPI(title="AutoVid Backend")
 
@@ -70,7 +71,12 @@ async def create_super_admin():
         print("ℹ️ SuperAdmin already exists.")
 
 # ✅ Run at startup
+# main.py
 @app.on_event("startup")
 async def startup_event():
     await create_super_admin()
-    print("🚀 Application startup complete.")
+
+async def create_super_admin():
+    existing = await db.users.find_one({"role": "superadmin"})  # ✅ await
+    if not existing:
+        await db.users.insert_one({...})
