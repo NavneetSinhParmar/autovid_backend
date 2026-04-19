@@ -5,11 +5,22 @@ from app.db.connection import db
 from app.utils.auth import hash_password
 import asyncio
 from fastapi.staticfiles import StaticFiles
+import os
 
 
 # ✅ Create app instance only once
 app = FastAPI(title="AutoVid Backend")
-app.mount("/media", StaticFiles(directory="media"), name="media")
+
+# Ensure `media` directory exists before mounting StaticFiles to avoid startup crashes
+media_dir = "media"
+if not os.path.isdir(media_dir):
+    try:
+        os.makedirs(media_dir, exist_ok=True)
+        print(f"Created missing directory: {media_dir}")
+    except Exception as e:
+        print(f"Warning: could not create media directory '{media_dir}': {e}")
+
+app.mount("/media", StaticFiles(directory=media_dir), name="media")
 
 # ✅ CORS setup
 origins = [
