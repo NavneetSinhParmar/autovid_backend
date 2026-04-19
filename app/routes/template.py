@@ -7,7 +7,7 @@ from datetime import datetime
 from bson import ObjectId
 import json
 from app.db.connection import db
-from app.utils.auth import require_roles
+from app.utils.auth import require_roles,get_current_user
 from app.services.video_renderer import render_preview,render_image_preview
 import uuid
 import os 
@@ -84,22 +84,25 @@ async def list_templates(user=Depends(require_roles("company"))):
 
 @router.get("/")
 async def get_template(
-    company_id: str = Query(None),
     template_name: str = Query(None),
     category: str = Query(None),
-    type: str = Query(None)
+    type: str = Query(None),
+    current_user: dict = Depends(get_current_user)
 ):
 
-    query = {"status": "active"}
-    if company_id:
-        query["company_id"] = company_id
+    query = {
+        "status": "active",
+        "company_id": current_user["company_id"]
+    }
+
     if template_name:
         query["template_name"] = template_name
+
     if category:
         query["category"] = category
+
     if type:
         query["type"] = type
-    
 
     template = await db.templates.find_one(query)
 
