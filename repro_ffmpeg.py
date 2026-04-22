@@ -10,6 +10,8 @@ OUTPUT = "repro_output.mp4"
 # This results in C\\:/Windows/Fonts/arial.ttf
 FONT_FAIL = "C:/Windows/Fonts/arial.ttf".replace(":", "\\\\:")
 
+print(FFMPEG, 'FFMPEG')
+
 def run_test(font_path_str, name):
     print(f"--- Running Test: {name} ---")
     print(f"Font string: {font_path_str}")
