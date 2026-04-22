@@ -13,7 +13,7 @@ from bson import ObjectId
 from app.db.connection import db 
 from dotenv import load_dotenv
 load_dotenv()
-
+print(subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True))
 # ---------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------
@@ -24,6 +24,8 @@ MEDIA_ROOT = os.getenv("MEDIA_ROOT", "media")
 print("📁 MEDIA_ROOT =", MEDIA_ROOT)
 
 FFMPEG = "ffmpeg"
+
+print("🔧 FFMPEG =", FFMPEG)
 
 BASE_DIR = os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))
