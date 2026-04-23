@@ -1,11 +1,12 @@
 services:
   - type: web
-    name: autovid-api
+    name: autovid-backend
     runtime: python
     plan: free
 
     buildCommand: |
       apt-get update && apt-get install -y ffmpeg
+      pip install --upgrade pip
       pip install -r requirements.txt
 
     startCommand: |
@@ -15,20 +16,17 @@ services:
       - key: PYTHON_VERSION
         value: 3.11
 
-      - key: BASE_URL
-        value: https://autovid-backend-1.onrender.com
+      - key: PORT
+        value: 10000
 
       - key: MONGO_URL
         sync: false
 
       - key: DATABASE_NAME
-        value: autovid_db
+        sync: false
 
       - key: SECRET_KEY
-        generateValue: true
+        sync: false
 
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "60"
-
-    packages:
-      - ffmpeg
