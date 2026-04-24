@@ -970,7 +970,7 @@ def render_preview(template_json, context_data=None, output_path=None):
         # Collect audio from trackItemIds (MP3 etc.) - same order as design
         for item_id in track_item_ids:
             item = track_items_map.get(item_id, {})
-            if item.get("type") != "audio":
+            if item.get("type") not in ["audio", "voiceover"]:
                 continue
             details = item.get("details", {})
             src_got = details.get("src", "")
@@ -1149,7 +1149,17 @@ def render_preview(template_json, context_data=None, output_path=None):
         trim_to = trim.get("to")
         if trim_to is not None:
             trim_to = int(trim_to)
+        # vol = safe_float(a["item"].get("details", {}).get("volume", 100)) / 100.0
+        item_type = a["item"].get("type")
+
         vol = safe_float(a["item"].get("details", {}).get("volume", 100)) / 100.0
+
+        if item_type == "voiceover":
+            vol = max(vol, 0.9)   # voice always loud
+
+        if item_type == "audio":
+            vol = min(vol, 0.4)   # music always low
+        # --------------------------------------------------- #   
         if vol <= 0:
             continue
         audio_sources.append({
