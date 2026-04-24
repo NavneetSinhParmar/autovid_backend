@@ -1,8 +1,8 @@
 import subprocess
 import os
 
-# FFMPEG = r"C:\ffmpeg-2025-12-28-git-9ab2a437a1-full_build\bin\ffmpeg./"
-FFMPEG = "ffmpeg"
+FFMPEG = r"C:\ffmpeg-2025-12-28-git-9ab2a437a1-full_build\bin\ffmpeg.exe"
+# FFMPEG = "ffmpeg"
 OUTPUT = "repro_output.mp4"
 
 # The current failing logic from video_renderer.py

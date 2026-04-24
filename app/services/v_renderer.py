@@ -13,7 +13,6 @@ from bson import ObjectId
 from app.db.connection import db 
 from dotenv import load_dotenv
 load_dotenv()
-print(subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True))
 # ---------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------

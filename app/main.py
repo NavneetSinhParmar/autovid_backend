@@ -75,8 +75,4 @@ async def create_super_admin():
 @app.on_event("startup")
 async def startup_event():
     await create_super_admin()
-
-async def create_super_admin():
-    existing = await db.users.find_one({"role": "superadmin"})  # ✅ await
-    if not existing:
-        await db.users.insert_one({...})
+    print("🚀 Application startup complete.")
