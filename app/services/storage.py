@@ -21,7 +21,6 @@ async def save_company_file(file, company_user_id: str):
     path = save_file_local(content, company_user_id, file.filename)
     return path, len(content)
 
-
 async def save_customer_file(
     file,
     company_user_id: str,
@@ -31,7 +30,6 @@ async def save_customer_file(
     folder = f"{company_user_id}/customers/{customer_id}"
     path = save_file_local(content, folder, file.filename)
     return path, len(content)
-
 
 def save_file_local_for_media(file_obj: bytes, company_id: str, filename: str) -> str:
     print(f"Saving file for company {company_id} with filename {filename}")
@@ -51,7 +49,6 @@ def save_file_local_for_media(file_obj: bytes, company_id: str, filename: str) -
     # url.py will add the /media/ prefix when building full URLs
     # This prevents duplicate paths like /media/./media/...
     return f"{company_id}/{unique_name}"
-
 
 async def save_upload_file(file, company_id: str) -> Tuple[str, int]:
     print("Saving uploaded file for company:", company_id)

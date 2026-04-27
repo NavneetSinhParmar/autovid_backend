@@ -17,15 +17,16 @@ MONGO_URL = os.getenv("MONGO_URL")
 DB_NAME = os.getenv("DATABASE_NAME")
 
 print(f"Connecting to MongoDB at: {MONGO_URL}, Database: {DB_NAME}")
+# client = AsyncIOMotorClient(MONGO_URL)
+
+# production code
 print("Python:", sys.version.split()[0], "OpenSSL:", ssl.OPENSSL_VERSION)
 if ca_bundle:
 	print("Using certifi CA bundle:", ca_bundle)
 else:
 	print("certifi not available; connection will use system CA bundle")
 
-# Pass TLS options explicitly to help avoid SSL/TLS handshake issues.
-# If you still get TLS errors, try upgrading `pymongo`, `motor`, and `certifi`,
-# and verify network/firewall allows outbound TLS to Atlas hosts.
+
 client_kwargs = {
 	"serverSelectionTimeoutMS": 20000,
 	"socketTimeoutMS": 20000,
