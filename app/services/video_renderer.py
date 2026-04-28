@@ -15,6 +15,7 @@ load_dotenv()
 from app.services.render_helper import (
     find_background,
 )
+from app.utils.placeholders import replace_placeholders
 # ---------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------
@@ -65,35 +66,7 @@ def has_audio_stream(src: str) -> bool:
     except Exception:
         return False
 
-def replace_placeholders(text: str, context: dict) -> str:
-    if not isinstance(text, str):
-        return text
-
-    text = re.sub(r"\{\{\s*customer\?\.", "{{customer.", text)
-    text = re.sub(r"\{\{\s*company\?\.", "{{company.", text)
-
-    flat = {}
-    for scope, data in context.items():        # customer, company
-        if not isinstance(data, dict):
-            continue
-
-        for key, value in data.items():
-            if isinstance(value, (str, int, float)):
-                text = text.replace(
-                    f"{{{{{scope}.{key}}}}}",
-                    str(value)
-                )
-                flat[key] = str(value)
-                if key == "logo_url":
-                    flat["logoUrl"] = str(value)
-                if key == "company_name":
-                    flat["companyName"] = str(value)
-                if key == "customer_company_name":
-                    flat["customerCompanyName"] = str(value)
-
-    for key, value in flat.items():
-        text = text.replace(f"{{{{{key}}}}}", str(value))
-    return text
+# Placeholder replacement is centralized in app/utils/placeholders.py
 
 def parse_position(value):
     if isinstance(value, str):
