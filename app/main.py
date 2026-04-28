@@ -1,12 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import auth, company, customer, admin, media, template, video_task, task, category, public, public_templates
+from app.routes import auth, company, customer, admin, media, template, video_task, task, category, public, public_templates, voise_over
 from app.db.connection import db
 from app.utils.auth import hash_password
 import asyncio
 from fastapi.staticfiles import StaticFiles
 import os
-
 
 
 # ✅ Create app instance only once
@@ -49,6 +48,7 @@ app.include_router(task.router)
 app.include_router(category.router)
 app.include_router(public.router)
 app.include_router(public_templates.router)
+app.include_router(voise_over.router)
 
 # ✅ Simple health check route
 @app.get("/")
