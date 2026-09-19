@@ -3,7 +3,7 @@ from datetime import datetime
 from bson import ObjectId
 from app.db.connection import db
 from app.utils.auth import require_roles, hash_password
-from app.services.storage import save_company_file
+from app.services.storage import delete_media_folder, ensure_media_folder, save_company_file
 from typing import Optional
 from app.services.url import build_media_url
 from fastapi import Request
@@ -65,11 +65,14 @@ async def create_company(
     }
 
     company_result = await db.companies.insert_one(company_doc)
+    company_id = str(company_result.inserted_id)
+    ensure_media_folder(user_id)
+    ensure_media_folder(company_id)
 
 
     return {
         "message": "Company created successfully",
-        "company_id": str(company_result.inserted_id),
+        "company_id": company_id,
         "user_id": user_id,
         "logo_url": build_media_url(logo_url)
     }
@@ -235,6 +238,37 @@ async def delete_company(
         user_object_id = ObjectId(company["user_id"])
     except Exception:
         raise HTTPException(500, "Invalid user_id stored in company")
+
+    customer_docs = await db.customers.find(
+        {"linked_company_id": ObjectId(company_id)}
+    ).to_list(length=None)
+    customer_user_ids = [c["user_id"] for c in customer_docs if c.get("user_id")]
+    customer_ids = [c["_id"] for c in customer_docs]
+
+    template_docs = await db.templates.find(
+        {"company_id": company_id}
+    ).to_list(length=None)
+    template_ids = [str(t["_id"]) for t in template_docs]
+
+    await db.video_tasks.delete_many({
+        "$or": [
+            {"company_id": company_id},
+            {"template_id": {"$in": template_ids}},
+            {"customer_id": {"$in": [str(cid) for cid in customer_ids]}},
+            {"template_id": {"$in": [ObjectId(tid) for tid in template_ids if ObjectId.is_valid(tid)]}},
+            {"customer_id": {"$in": customer_ids}},
+        ]
+    })
+    await db.media.delete_many({"company_id": company_id})
+    await db.templates.delete_many({"company_id": company_id})
+    await db.customers.delete_many({"linked_company_id": ObjectId(company_id)})
+    if customer_user_ids:
+        await db.users.delete_many({"_id": {"$in": customer_user_ids}})
+
+    # Delete all company media. user_id is included for legacy company-logo folders.
+    delete_media_folder(company_id)
+    if company.get("user_id") and str(company["user_id"]) != company_id:
+        delete_media_folder(str(company["user_id"]))
 
     # Delete company
     await db.companies.delete_one({"_id": ObjectId(company_id)})

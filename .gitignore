@@ -7,13 +7,11 @@ __pycache__/
 
 # Virtual environments
 venv/
-.env/
-.env
+# .env/
+# .env
 .venv/
 
-# Environment variables
-*.env
-.env.*
+
 
 # FastAPI / Uvicorn logs
 *.log
@@ -86,3 +84,7 @@ concat_*.txt
 # Ignore generated media
 media/generated/
 media/*_preview.mp4
+encore.gen.go
+encore.gen.cue
+/.encore
+/encore.gen

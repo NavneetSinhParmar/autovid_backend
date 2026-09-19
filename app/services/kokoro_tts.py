@@ -106,6 +106,7 @@ async def synthesize_and_store_media(
     voisetext: str,
     voice: str,
     speed: float,
+    folder_path: str | None = None,
 ) -> dict:
     """
     Generates TTS audio, stores it under ./media/<company_id>/..., and returns:
@@ -121,7 +122,7 @@ async def synthesize_and_store_media(
     uid = uuid.uuid4().hex
     filename = f"tts_{uid}.{ext}"
     fake_upload = UploadFile(filename=filename, file=BytesIO(final_bytes))
-    local_path, size = await save_upload_file(fake_upload, company_id)
+    local_path, size = await save_upload_file(fake_upload, company_id, folder_path=folder_path)
 
     return {
         "file_url": local_path,  # relative path (no ./media prefix)

@@ -9,8 +9,10 @@ import requests
 import hashlib 
 import json 
 import shlex
+import shutil
 from bson import ObjectId 
 from app.db.connection import db 
+from app.services.storage import ensure_media_folder, get_media_abs_path, template_folder_path
 from dotenv import load_dotenv
 load_dotenv()
 # ---------------------------------------------------------
@@ -175,12 +177,17 @@ def generate_ffmpeg_cmd(template):
     cmd += ["-filter_complex", filter_complex]
     cmd += map_audio
     cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(design.get('fps',30))]
-    cmd += ["-t", str(duration), "output_preview.mp4"]
+    cmd += ["-t", str(duration), os.path.join(MEDIA_ROOT, f"output_preview_{uuid.uuid4().hex}.mp4")]
     
     # Return safe shell command
     return " ".join(shlex.quote(c) for c in cmd)
 
 def render_preview(template, output_path):
+    if shutil.which(FFMPEG) is None:
+        raise FileNotFoundError(
+            "ffmpeg binary not found on server. Install ffmpeg in deployment "
+            "(for Railway: add nixpacks.toml with aptPkgs = ['ffmpeg'])."
+        )
     design = template.get("template_json", {}).get("design", {})
     track_items_map = design.get("trackItemsMap", {})
     tracks = design.get("tracks", [])
@@ -268,6 +275,11 @@ def render_preview(template, output_path):
 
     
 def render_video(task_id: str):
+    if shutil.which(FFMPEG) is None:
+        raise FileNotFoundError(
+            "ffmpeg binary not found on server. Install ffmpeg in deployment "
+            "(for Railway: add nixpacks.toml with aptPkgs = ['ffmpeg'])."
+        )
     task = db.video_tasks.find_one({"_id": ObjectId(task_id)})
     template = db.templates.find_one({"_id": ObjectId(task["template_id"])})
     customer = db.customers.find_one({"_id": ObjectId(task["customer_id"])})
@@ -277,7 +289,10 @@ def render_video(task_id: str):
 
     text = customer["full_name"]
 
-    output_path = os.path.join(MEDIA_ROOT, f"{task_id}.mp4")
+    folder = ensure_media_folder(
+        template.get("folder_path") or template_folder_path(str(template.get("company_id")), str(template["_id"]))
+    )
+    output_path = get_media_abs_path(f"{folder}/{task_id}.mp4")
 
     vf = (
         f"drawtext="

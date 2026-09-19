@@ -1,14 +1,19 @@
 from fastapi import APIRouter, HTTPException, Body
-from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from bson import ObjectId
 from datetime import datetime
-import os
 from pymongo import ReturnDocument
+import asyncio
+import shutil
 
 from app.db.connection import db
-from app.services.video_renderer import render_preview, render_image_preview
+from app.services.video_renderer import render_preview, render_image_preview, sync_track_item_bounds
 from copy import deepcopy
+from app.utils.placeholders import replace_placeholders
+from app.services.kokoro_tts import synthesize_and_store_media
+from app.services.url import build_media_url
+from app.services.storage import ensure_media_folder, get_media_abs_path, template_folder_path
+from app.services.render_queue import run_render_job
 
 router = APIRouter(prefix="/public/templates", tags=["Public Templates"])
 
@@ -17,6 +22,20 @@ def _template_oid(template_id: str) -> ObjectId:
     if not ObjectId.is_valid(template_id):
         raise HTTPException(status_code=400, detail="Invalid template id")
     return ObjectId(template_id)
+
+
+def _template_folder(template: dict, template_id: str) -> str:
+    folder = template.get("folder_path")
+    if not folder:
+        company_id = template.get("company_id")
+        if not company_id:
+            raise HTTPException(status_code=400, detail="Template company_id missing")
+        folder = template_folder_path(str(company_id), template_id)
+    return ensure_media_folder(folder)
+
+
+def _template_output_path(template: dict, template_id: str, filename: str) -> str:
+    return get_media_abs_path(f"{_template_folder(template, template_id)}/{filename}")
 
 
 def normalize_customer(customer: dict) -> dict:
@@ -35,10 +54,28 @@ def normalize_company(company: dict | None) -> dict:
 
     return {
         "company_name": company.get("company_name", ""),
+        "email": company.get("email", ""),
         "description": company.get("description", ""),
         "mobile": company.get("mobile", ""),
         "logo_url": company.get("logo_url", ""),
     }
+
+async def hydrate_company_email(company: dict | None) -> dict | None:
+    if not company or company.get("email"):
+        return company
+
+    user_id = company.get("user_id")
+    if not user_id:
+        return company
+
+    try:
+        user_doc = await db.users.find_one({"_id": ObjectId(str(user_id))}, {"email": 1})
+    except Exception:
+        user_doc = await db.users.find_one({"_id": str(user_id)}, {"email": 1})
+
+    if user_doc and user_doc.get("email"):
+        company["email"] = user_doc["email"]
+    return company
 
 
 # ================= PUBLIC PREVIEW =================
@@ -54,19 +91,17 @@ async def public_preview(template_id: str, data: dict):
     if not template:
         raise HTTPException(status_code=404, detail="Template not available")
 
-    customer = normalize_customer(data.get("customer", {}))
     fields = data.get("fields", {}) or {}
+    customer = normalize_customer(data.get("customer", {}) or fields.get("customer", {}) or {})
 
     company = None
     company_id = template.get("company_id")
 
     if company_id:
         company = await db.companies.find_one({"_id": ObjectId(company_id)})
+        company = await hydrate_company_email(company)
 
     company = normalize_company(company)
-
-    media_dir = os.path.abspath("media")
-    os.makedirs(media_dir, exist_ok=True)
 
     template_type = str(template.get("type", "video")).lower()
 
@@ -74,22 +109,28 @@ async def public_preview(template_id: str, data: dict):
     if template_type in ("img", "image"):
 
         filename = f"{template_id}_public_preview.jpg"
-        preview_path = os.path.join(media_dir, filename)
+        preview_path = _template_output_path(template, template_id, filename)
 
         tpl_json = deepcopy(template.get("template_json", {}))
+        fields_snapshot = deepcopy(fields)
+        customer_snapshot = deepcopy(customer)
+        company_snapshot = deepcopy(company)
 
-        replacements = _apply_fields_to_template(
-            tpl_json, fields, customer, company
-        )
+        async def work(job_id: str, output_path: str, _folder: str):
+            job_tpl_json = deepcopy(tpl_json)
+            _apply_fields_to_template(
+                job_tpl_json, deepcopy(fields_snapshot), deepcopy(customer_snapshot), deepcopy(company_snapshot)
+            )
+            await asyncio.to_thread(
+                render_image_preview,
+                job_tpl_json,
+                deepcopy(customer_snapshot),
+                deepcopy(company_snapshot),
+                output_path
+            )
+            shutil.copyfile(output_path, preview_path)
 
-        await run_in_threadpool(
-            render_image_preview,
-            tpl_json,
-            customer,
-            company,
-            preview_path
-        )
-
+        await run_render_job(kind="public_image_preview", extension="jpg", work=work)
         return FileResponse(
             preview_path,
             media_type="image/jpeg",
@@ -98,28 +139,39 @@ async def public_preview(template_id: str, data: dict):
 
     # VIDEO TEMPLATE
     filename = f"{template_id}_public_preview.mp4"
-    preview_path = os.path.join(media_dir, filename)
+    preview_path = _template_output_path(template, template_id, filename)
 
     full_template = deepcopy(template)
+    fields_snapshot = deepcopy(fields)
+    customer_snapshot = deepcopy(customer)
+    company_snapshot = deepcopy(company)
 
-    tpl_json = full_template.get("template_json", {}) or {}
-    replacements = _apply_fields_to_template(
-        tpl_json, fields, customer, company
-    )
-
-    full_template["template_json"] = tpl_json
-
-    await run_in_threadpool(
-        render_preview,
-        full_template,
-        {
-            "customer": customer,
-            "company": company
-        },
-        preview_path
-    )
+    async def work(job_id: str, output_path: str, folder: str):
+        job_template = deepcopy(full_template)
+        tpl_json = job_template.get("template_json", {}) or {}
+        _apply_fields_to_template(tpl_json, deepcopy(fields_snapshot), deepcopy(customer_snapshot), deepcopy(company_snapshot))
+        await _apply_dynamic_audio_to_template(
+            tpl_json,
+            fields=deepcopy(fields_snapshot),
+            customer=deepcopy(customer_snapshot),
+            company=deepcopy(company_snapshot),
+            company_id=str(template.get("company_id") or ""),
+            folder_path=folder,
+        )
+        job_template["template_json"] = tpl_json
+        await asyncio.to_thread(
+            render_preview,
+            job_template,
+            {
+                "customer": deepcopy(customer_snapshot),
+                "company": deepcopy(company_snapshot)
+            },
+            output_path
+        )
+        shutil.copyfile(output_path, preview_path)
 
     # Return the generated file directly so clients receive a usable URL/file
+    await run_render_job(kind="public_video_preview", extension="mp4", work=work)
     return FileResponse(
         preview_path,
         media_type="video/mp4",
@@ -138,19 +190,17 @@ async def public_download(template_id: str, data: dict):
     if not template:
         raise HTTPException(status_code=404, detail="Template not available")
 
-    customer = normalize_customer(data.get("customer", {}))
     fields = data.get("fields", {}) or {}
+    customer = normalize_customer(data.get("customer", {}) or fields.get("customer", {}) or {})
 
     company = None
     company_id = template.get("company_id")
 
     if company_id:
         company = await db.companies.find_one({"_id": ObjectId(company_id)})
+        company = await hydrate_company_email(company)
 
     company = normalize_company(company)
-
-    media_dir = os.path.abspath("media")
-    os.makedirs(media_dir, exist_ok=True)
 
     template_type = str(template.get("type", "video")).lower()
 
@@ -158,22 +208,28 @@ async def public_download(template_id: str, data: dict):
     if template_type in ("img", "image"):
 
         filename = f"{template_id}_download.jpg"
-        preview_path = os.path.join(media_dir, filename)
+        preview_path = _template_output_path(template, template_id, filename)
 
         tpl_json = deepcopy(template.get("template_json", {}))
+        fields_snapshot = deepcopy(fields)
+        customer_snapshot = deepcopy(customer)
+        company_snapshot = deepcopy(company)
 
-        _apply_fields_to_template(
-            tpl_json, fields, customer, company
-        )
+        async def work(job_id: str, output_path: str, _folder: str):
+            job_tpl_json = deepcopy(tpl_json)
+            _apply_fields_to_template(
+                job_tpl_json, deepcopy(fields_snapshot), deepcopy(customer_snapshot), deepcopy(company_snapshot)
+            )
+            await asyncio.to_thread(
+                render_image_preview,
+                job_tpl_json,
+                deepcopy(customer_snapshot),
+                deepcopy(company_snapshot),
+                output_path
+            )
+            shutil.copyfile(output_path, preview_path)
 
-        await run_in_threadpool(
-            render_image_preview,
-            tpl_json,
-            customer,
-            company,
-            preview_path
-        )
-
+        await run_render_job(kind="public_image_download", extension="jpg", work=work)
         return FileResponse(
             preview_path,
             media_type="image/jpeg",
@@ -182,28 +238,38 @@ async def public_download(template_id: str, data: dict):
 
     # VIDEO
     filename = f"{template_id}_download.mp4"
-    preview_path = os.path.join(media_dir, filename)
+    preview_path = _template_output_path(template, template_id, filename)
 
     full_template = deepcopy(template)
+    fields_snapshot = deepcopy(fields)
+    customer_snapshot = deepcopy(customer)
+    company_snapshot = deepcopy(company)
 
-    tpl_json = full_template.get("template_json", {}) or {}
+    async def work(job_id: str, output_path: str, folder: str):
+        job_template = deepcopy(full_template)
+        tpl_json = job_template.get("template_json", {}) or {}
+        _apply_fields_to_template(tpl_json, deepcopy(fields_snapshot), deepcopy(customer_snapshot), deepcopy(company_snapshot))
+        await _apply_dynamic_audio_to_template(
+            tpl_json,
+            fields=deepcopy(fields_snapshot),
+            customer=deepcopy(customer_snapshot),
+            company=deepcopy(company_snapshot),
+            company_id=str(template.get("company_id") or ""),
+            folder_path=folder,
+        )
+        job_template["template_json"] = tpl_json
+        await asyncio.to_thread(
+            render_preview,
+            job_template,
+            {
+                "customer": deepcopy(customer_snapshot),
+                "company": deepcopy(company_snapshot)
+            },
+            output_path
+        )
+        shutil.copyfile(output_path, preview_path)
 
-    _apply_fields_to_template(
-        tpl_json, fields, customer, company
-    )
-
-    full_template["template_json"] = tpl_json
-
-    await run_in_threadpool(
-        render_preview,
-        full_template,
-        {
-            "customer": customer,
-            "company": company
-        },
-        preview_path
-    )
-
+    await run_render_job(kind="public_video_download", extension="mp4", work=work)
     return FileResponse(
         preview_path,
         media_type="video/mp4",
@@ -329,6 +395,10 @@ def _get_field_value(fields: dict, path: str):
                 return v
         return None
 
+    exact = _ci_get(fields, path)
+    if exact is not None:
+        return exact
+
     parts = str(path).split(".")
     cur = fields
     for p in parts:
@@ -378,6 +448,10 @@ def _apply_fields_to_template(
                     fp = fp[2:-2].strip()
 
                 value = _get_field_value(fields, fp)
+                if value is None and fp.startswith("customer.") and isinstance(customer, dict):
+                    value = _get_field_value(customer, fp.split(".", 1)[1])
+                if value is None and fp.startswith("company.") and isinstance(company, dict):
+                    value = _get_field_value(company, fp.split(".", 1)[1])
 
             # 2️⃣ Try fieldLabel
             if value is None and field_label:
@@ -441,6 +515,92 @@ def _apply_fields_to_template(
             continue
 
     design["trackItemsMap"] = track_map
+    sync_track_item_bounds(design)
     template_json["design"] = design
 
     return replacements
+
+
+async def _apply_dynamic_audio_to_template(
+    template_json: dict,
+    *,
+    fields: dict,
+    customer: dict,
+    company: dict,
+    company_id: str | None,
+    folder_path: str | None = None,
+):
+    """
+    For audio items marked as customer fields (dataType=audio), resolve `voisetext`
+    placeholders like `{customer.full_name}` / `{custom_text1}` and generate a TTS file.
+    Then set `details.src` to the generated file so `render_preview()` includes it.
+    """
+    if not isinstance(template_json, dict):
+        return
+
+    if not company_id:
+        return
+
+    design = template_json.get("design", {})
+    track_map = design.get("trackItemsMap", {})
+
+    context = {
+        "customer": customer or {},
+        "company": company or {},
+        **(fields or {}),
+    }
+
+    for _tid, item in (track_map or {}).items():
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") != "audio":
+            continue
+
+        metadata = item.get("metadata", {}) or {}
+        if not metadata.get("isCustomerField"):
+            continue
+        if str(metadata.get("dataType") or metadata.get("datatype") or "").lower() != "audio":
+            continue
+
+        voisetext = (
+            item.get("voisetext")
+            or item.get("voiceText")
+            or (item.get("details", {}) or {}).get("voisetext")
+        )
+        if not isinstance(voisetext, str) or not voisetext.strip():
+            continue
+
+        resolved_text = replace_placeholders(voisetext, context).strip()
+        if not resolved_text:
+            continue
+
+        voice = item.get("voice") or metadata.get("voice") or "af_heart"
+        speed = item.get("playbackRate") or item.get("speed") or 1.0
+        try:
+            speed = float(speed)
+        except Exception:
+            speed = 1.0
+
+        stored = await synthesize_and_store_media(
+            company_id=str(company_id),
+            voisetext=resolved_text,
+            voice=str(voice),
+            speed=speed,
+            folder_path=folder_path,
+        )
+
+        details = item.get("details", {}) or {}
+        details["src"] = f"./media/{stored['file_url']}"
+        item["details"] = details
+        item["voisetext"] = resolved_text
+
+        # Also update metadata urls so clients can read the new mp3
+        meta = item.get("metadata", {}) or {}
+        new_public_url = build_media_url(stored["file_url"])
+        if new_public_url:
+            meta["uploadedUrl"] = new_public_url
+            meta["originalUrl"] = new_public_url
+        item["metadata"] = meta
+
+    design["trackItemsMap"] = track_map
+    template_json["design"] = design

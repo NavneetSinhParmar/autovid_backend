@@ -1,13 +1,15 @@
 import os
 import subprocess
 import shlex
-from typing import Dict, Any
+import shutil
+from typing import Dict, Any, Optional
 import uuid 
 import re 
 import urllib.parse 
 import requests 
 import hashlib 
 import shlex
+import logging
 from bson import ObjectId 
 from app.db.connection import db 
 from dotenv import load_dotenv
@@ -15,7 +17,9 @@ load_dotenv()
 from app.services.render_helper import (
     find_background,
 )
+from app.services.storage import ensure_media_folder, get_media_abs_path, template_folder_path
 from app.utils.placeholders import replace_placeholders
+from app.services.render_queue import current_render_job_id, current_render_temp_dir
 # ---------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------
@@ -24,6 +28,16 @@ MEDIA_ROOT = os.getenv("MEDIA_ROOT", "media")
 FFMPEG = "ffmpeg"
 FFPROBE = "ffprobe"
 
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+FFMPEG_THREADS = _env_int("FFMPEG_THREADS", 1)
+
 BASE_DIR = os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))
 )
@@ -31,6 +45,7 @@ FONT_PATH = os.path.join(BASE_DIR, "Fonts", "arial.ttf")
 FONT_PATH = FONT_PATH.replace("\\", "/")
 PX_RE = re.compile(r"-?\d+(\.\d+)?")
 FONT_CACHE_DIR = os.path.join(MEDIA_ROOT, "font_cache")
+logger = logging.getLogger(__name__)
 
 def abs_media_path(path: str) -> str:
     path = path.replace("\\", "/")
@@ -51,6 +66,42 @@ def ensure_file_exists(path: str):
     if not os.path.exists(path):
         raise FileNotFoundError(f"Media file not found: {path}")
 
+# ---------------------------------------------------------
+# ✅ NEW: Central src validation — used in ALL render paths
+# ---------------------------------------------------------
+def is_valid_src(src: str, label: str = "") -> bool:
+    """
+    Returns True only if src is a non-empty string that points to either:
+      - A remote URL (http/https) — assumed valid, FFmpeg will handle errors
+      - A local file path that actually exists on disk
+
+    Rejects:
+      - None / empty string
+      - Unresolved placeholders like {{customer.logo_url}}
+      - Local paths that don't exist on disk
+    """
+    if not src or not isinstance(src, str):
+        print(f"   ⏭ Skipping {label}: src is empty or None")
+        return False
+
+    src = src.strip()
+
+    # Unresolved placeholder — placeholder replacement found no value
+    if src.startswith("{{") or src.endswith("}}"):
+        print(f"   ⏭ Skipping {label}: unresolved placeholder → {src}")
+        return False
+
+    # Remote URL — trust FFmpeg to handle it
+    if src.startswith("http://") or src.startswith("https://"):
+        return True
+
+    # Local file — must actually exist
+    if not os.path.exists(src):
+        print(f"   ⏭ Skipping {label}: local file not found → {src}")
+        return False
+
+    return True
+
 def has_audio_stream(src: str) -> bool:
     try:
         cmd = [
@@ -61,7 +112,7 @@ def has_audio_stream(src: str) -> bool:
             "-of", "csv=p=0",
             src,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = _run_with_resolved_exec(cmd, exec_name="ffprobe", env_var="FFPROBE_BIN", capture_output=True, text=True)
         return result.returncode == 0 and result.stdout.strip() != ""
     except Exception:
         return False
@@ -98,6 +149,45 @@ def ffmpeg_escape_text(text: str) -> str:
             .replace("[", "\\[")
             .replace("]", "\\]")
     )
+
+
+def _resolve_exec(exec_name: str, env_var: str | None = None) -> str | None:
+    """Return full path for executable or None if not found."""
+    if env_var:
+        val = os.getenv(env_var)
+        if val:
+            return val
+    found = shutil.which(exec_name)
+    if found:
+        return found
+    return None
+
+
+def _run_with_resolved_exec(cmd, exec_name: str = "ffmpeg", env_var: str | None = None, **kwargs):
+    """Replace cmd[0] with resolved executable path and run subprocess."""
+    path = _resolve_exec(exec_name, env_var)
+    if not path:
+        ev = env_var or f"{exec_name.upper()}_BIN"
+        raise FileNotFoundError(
+            f"Required executable '{exec_name}' not found. Install '{exec_name}' on the server or set the environment variable {ev} to its full path."
+        )
+    cmd = list(cmd)
+    cmd[0] = path
+    if exec_name == "ffmpeg":
+        cmd[1:1] = [
+            "-hide_banner",
+            "-nostdin",
+            "-threads", str(FFMPEG_THREADS),
+            "-filter_threads", str(FFMPEG_THREADS),
+        ]
+        env = dict(os.environ)
+        env.setdefault("OMP_NUM_THREADS", str(FFMPEG_THREADS))
+        env.setdefault("MKL_NUM_THREADS", str(FFMPEG_THREADS))
+        kwargs.setdefault("env", env)
+    job_id = current_render_job_id.get()
+    if job_id:
+        logger.info("[render] job_id=%s running %s", job_id, exec_name)
+    return subprocess.run(cmd, **kwargs)
 
 def parse_color(value, default=(255, 255, 255, 1.0)):
     if value is None:
@@ -195,14 +285,11 @@ def resolve_font_file(details: Dict[str, Any]) -> str:
             pass
     
     font_family = details.get("fontFamily", "arial")
-    
-    # Convert to lowercase for comparison
     font_family_lower = str(font_family).lower()
     
-    # Common font mappings
     font_mappings = {
         "arial": "arial.ttf",
-        "helvetica": "arial.ttf",  # Helvetica often mapped to Arial
+        "helvetica": "arial.ttf",
         "times new roman": "times.ttf",
         "times": "times.ttf",
         "courier new": "cour.ttf",
@@ -211,69 +298,38 @@ def resolve_font_file(details: Dict[str, Any]) -> str:
         "georgia": "georgia.ttf",
     }
     
-    # Check mapped fonts
     if font_family_lower in font_mappings:
         font_file = font_mappings[font_family_lower]
         font_path = os.path.join(BASE_DIR, "Fonts", font_file)
         if os.path.exists(font_path):
             return font_path.replace("\\", "/")
     
-    # Try direct file search
     fonts_dir = os.path.join(BASE_DIR, "Fonts")
     if os.path.isdir(fonts_dir):
-        # Search for font files containing the family name
         font_files = []
         for file in os.listdir(fonts_dir):
             if file.lower().endswith(('.ttf', '.otf')):
                 if font_family_lower in file.lower():
                     font_files.append(os.path.join(fonts_dir, file))
-        
         if font_files:
-            # Return the first found font
             return font_files[0].replace("\\", "/")
     
-    # Ultimate fallback to arial
     font_path = os.path.join(BASE_DIR, "Fonts", "arial.ttf")
     if os.path.exists(font_path):
         return font_path.replace("\\", "/")
     
-    # If arial doesn't exist, return empty string (FFmpeg will use default)
     return ""
 
-def compute_line_spacing(line_height, font_size):
-    if not line_height or line_height in ("normal", ""):
-        return 0
+from typing import Optional
 
+def compute_line_spacing(line_height, font_size):
     try:
         font_size = float(font_size)
-
-        # -------- Case 1: Explicit px string --------
-        if isinstance(line_height, str) and "px" in line_height:
-            px_val = float(line_height.replace("px", "").strip())
-            return int(px_val - font_size)
-
-        # -------- Case 2: Pure number --------
-        if isinstance(line_height, (int, float)):
-            # If value <= 4 → treat as multiplier
-            if line_height <= 4:
-                return int((float(line_height) - 1.0) * font_size)
-            else:
-                # treat as pixel value
-                return int(float(line_height) - font_size)
-
-        # -------- Case 3: Numeric string --------
-        if isinstance(line_height, str) and line_height.replace(".", "", 1).isdigit():
-            numeric_val = float(line_height)
-
-            if numeric_val <= 4:
-                return int((numeric_val - 1.0) * font_size)
-            else:
-                return int(numeric_val - font_size)
-
-        return 0
-
     except Exception:
-        return 0
+        return -75
+
+    # Very tight spacing
+    return int(-(font_size * 0.65))
 
 def wrap_text(
     text,
@@ -299,10 +355,9 @@ def wrap_text(
     else:
         effective_width = int((canvas_width or 1920) * 0.7)
 
-    # Conservative estimate: proportional fonts ~0.52 font_size per char (avoids overflow)
     avg_char = max(
         1.0,
-        (font_size * 0.52) + max(0.0, letter_spacing)
+        (font_size * 0.68) + max(0.0, letter_spacing)
     )
 
     max_chars = max(1, int(effective_width / avg_char))
@@ -340,6 +395,7 @@ def wrap_text(
             lines.append(current)
     return "\n".join(lines)
 
+
 def parse_shadow_string(value):
     if not isinstance(value, str):
         return None
@@ -365,23 +421,20 @@ def smart_logo_mapping(src: str, size: str = None) -> str:
     if not isinstance(src, str):
         return src
     
-    # Don't modify if it's already a placeholder
     if src.startswith("{{") and src.endswith("}}"):
         return src
     
-    # Check for dummy placeholder URLs
     if "placehold.co" in src.lower():
         if "300x150" in src or "300" in src:
             return "{{customer.logo_url}}"
         elif "400x200" in src or "400" in src:
             return "{{company.logo_url}}"
-        # Default to company for unknown sizes
         return "{{company.logo_url}}"
     
     return src
 
 def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, context, canvas_w=None, canvas_h=None):
-    details = item.get("details", {})
+    details = item.get("details", {}) or {}
     display = item.get("display", {})
     start = display.get("from", 0) / 1000
     end = display.get("to", duration * 1000) / 1000
@@ -392,9 +445,6 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
     if context and isinstance(context, dict):
         raw_text = replace_placeholders(raw_text, context)
 
-    # ------------------------
-    # textTransform (uppercase / lowercase / capitalize)
-    # ------------------------
     transform = str(details.get("textTransform", "none")).lower()
     if transform == "uppercase":
         raw_text = raw_text.upper()
@@ -402,11 +452,9 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
         raw_text = raw_text.lower()
     elif transform in ("capitalize", "title"):
         raw_text = raw_text.title()
-    # ------------------------
-    # TEXT SETTINGS
-    # ------------------------
+
     font_size = int(details.get("fontSize", 40) * scale_val)
-    font_size = min(font_size, 200)  # Limit to 200px maximum
+    font_size = min(font_size, 200)
 
     opacity = float(details.get("opacity", 100)) / 100.0
     
@@ -414,14 +462,9 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
     if details.get("letterSpacing") not in (None, "normal"):
         letter_spacing = parse_px(details.get("letterSpacing", 0)) * scale_val
 
-    line_spacing = compute_line_spacing(
-        details.get("lineHeight", "normal"),
-        font_size
-    )
+    raw_line_height = details.get("lineHeight", details.get("line-height", "normal"))
+    line_spacing = compute_line_spacing(raw_line_height, font_size)
 
-    # ------------------------
-    # WIDTH + WRAP
-    # ------------------------
     raw_width = details.get("width")
     max_width = 0
     try:
@@ -443,6 +486,44 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
         canvas_width=canvas_w,
     )
 
+    
+    raw_height = details.get("height")
+    if raw_height:
+        try:
+            max_height = float(parse_px(raw_height)) * scale_val
+
+            # Get lineHeight multiplier (CSS default "normal" ≈ 1.2)
+            raw_lh = raw_line_height
+            if raw_lh in ("normal", "", None) or (
+                isinstance(raw_lh, str) and raw_lh.strip().lower() in ("normal", "auto", "inherit")
+            ):
+                lh_multiplier = 1.2
+            else:
+                try:
+                    rs = str(raw_lh).strip()
+                    if rs.endswith("%"):
+                        lh_multiplier = float(rs[:-1].strip()) / 100.0
+                    else:
+                        lh_val = float(rs.replace("px", "").strip())
+                        lh_multiplier = lh_val if lh_val <= 4 else lh_val / font_size
+                except Exception:
+                    lh_multiplier = 1.2
+
+            effective_line_h = font_size * lh_multiplier
+
+            # Only clamp if height is meaningfully larger than one line
+            # (avoids clamping when height is just auto/single-line default)
+            min_multiline_height = effective_line_h * 1.8
+            if max_height >= min_multiline_height:
+                max_lines = max(1, int(max_height / effective_line_h))
+                lines = wrapped_text.splitlines()
+                if len(lines) > max_lines:
+                    wrapped_text = "\n".join(lines[:max_lines])
+            # else: height looks like single-line default — don't clamp, let it wrap freely
+
+        except Exception:
+            pass
+
     textfile_path = ""
     try:
         textfile_path = write_text_temp(wrapped_text)
@@ -451,17 +532,12 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
 
     text = ffmpeg_escape_text(wrapped_text)
 
-    # ------------------------
-    # POSITION
-    # ------------------------
     left = parse_px(details.get("left", 0))
     top = parse_px(details.get("top", 0))
 
-    # --- CORRECT ALIGNMENT LOGIC (now with defined variables) ---
     align = str(details.get("textAlign", "left")).lower()
 
     box_w = max_width if max_width > 0 else (float(canvas_w or 1920) - left)
-  
 
     if align == "center":
         x_expr = f"{left}+({box_w}-text_w)/2"
@@ -470,7 +546,6 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
     else:
         x_expr = f"{left}"
 
-    # Always use exact top
     y_expr = f"{top}"
 
     font_path = resolve_font_file(details)
@@ -489,10 +564,10 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
         f"y={y_expr}",
         f"fontsize={font_size}",
         f"fontcolor={text_color}",
+        "text_shaping=1",
         "fix_bounds=1"
     ]
 
-    # Add proper multiline alignment
     if align == "center":
         base_params.append("text_align=center")
     elif align == "right":
@@ -500,26 +575,23 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
     else:
         base_params.append("text_align=left")
 
-    # Letter spacing
     if letter_spacing:
         base_params.append(f"letter_spacing={int(letter_spacing)}")
 
-    # Line spacing
-    if line_spacing:
+    # Omit line_spacing when None — "normal" uses font native leading (no double spacing).
+    if line_spacing is not None:
         base_params.append(f"line_spacing={int(line_spacing)}")
 
-    # Background box
     if bg_color[3] > 0:
         base_params.append("box=1")
         base_params.append(f"boxcolor={bg_color_str}")
-    # Border    
+
     border_width = details.get("borderWidth", 0)
     border_color = details.get("borderColor", "transparent")
     if border_width and border_color and border_color != "transparent":
         base_params.append(f"borderw={int(border_width)}")
         base_params.append(f"bordercolor={ffmpeg_color(parse_color(border_color), opacity)}")
 
-    # Shadow    
     shadows = []
     text_shadow = parse_shadow_string(details.get("textShadow", "none"))
     if text_shadow:
@@ -555,8 +627,7 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
         ]
         if letter_spacing:
             shadow_params.append(f"letter_spacing={int(letter_spacing)}")
-
-        if line_spacing:
+        if line_spacing is not None:
             shadow_params.append(f"line_spacing={int(line_spacing)}")
         filter_parts.append(
             f"{current_label}drawtext={':'.join(shadow_params)}:enable='between(t,{start},{end})'{shadow_label}"
@@ -570,95 +641,11 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
 
     return out_label, text_idx + 1
 
-def generate_ffmpeg_cmd(template):
-    design = template['template_json']['design']
-    track_map = design['trackItemsMap']
-    duration = template.get('duration', 10)
-    canvas_w, canvas_h = resolve_canvas_size(design)
-    
-    filter_parts = []
-    input_files = []
-    map_audio = []
-    
-    # 1️⃣ Base black canvas
-    filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base];")
-    last_label = "[base]"
-    
-    # 2️⃣ Process all video items
-    video_labels = []
-    for idx, vid_id in enumerate([tid for tid in design['trackItemIds'] if track_map[tid]['type']=='video']):
-        item = track_map[vid_id]
-        path = item['details']['src']
-        input_files.append(path)
-        start = item.get('display', {}).get('from', 0)/1000
-        end = item.get('display', {}).get('to', duration*1000)/1000
-        scale_factor = parse_scale(item['details'].get('transform', 'scale(1)'))
-        orig_w = float(item['details'].get('width', canvas_w))
-        orig_h = float(item['details'].get('height', canvas_h))
-        scaled_w = orig_w * scale_factor
-        scaled_h = orig_h * scale_factor
-        left = float(parse_px(item['details'].get('left', 0)))
-        top = float(parse_px(item['details'].get('top', 0)))
-        left = left + (orig_w - scaled_w) / 2
-        top = top + (orig_h - scaled_h) / 2
-        filter_parts.append(f"[{idx}:v]scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease,setpts=PTS-STARTPTS[v{idx}];")
-        filter_parts.append(f"{last_label}[v{idx}]overlay={left}:{top}:enable='between(t,{start},{end})'[o{idx}];")
-        last_label = f"[o{idx}]"
-        video_labels.append(last_label)
-    
-   
-    
-    # 4️⃣ Process all image items
-    image_items = [tid for tid in design['trackItemIds'] if track_map[tid]['type']=='image']
-    for idx, img_id in enumerate(image_items):
-        item = track_map[img_id]
-        path = item['details']['src']
-        input_files.append(path)
-        start = item['display']['from']/1000
-        end = item['display']['to']/1000
-        scale_x = parse_scale(item['details'].get('transform', 'scale(1)'))
-        orig_w = float(item['details'].get('width', 0) or canvas_w)
-        orig_h = float(item['details'].get('height', 0) or canvas_h)
-        scaled_w = orig_w * scale_x
-        scaled_h = orig_h * scale_x
-        x = float(parse_px(item['details'].get('left', 0)))
-        y = float(parse_px(item['details'].get('top', 0)))
-        x = x + (orig_w - scaled_w) / 2
-        y = y + (orig_h - scaled_h) / 2
-        filter_parts.append(f"[{len(video_labels)+idx}:v]scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease,setpts=PTS-STARTPTS[vimg{idx}];")
-        filter_parts.append(f"{last_label}[vimg{idx}]overlay={x}:{y}:enable='between(t,{start},{end})'[oimg{idx}];")
-        last_label = f"[oimg{idx}]"
-    
-    # 5️⃣ Audio items
-    audio_items = [tid for tid in design['trackItemIds'] if track_map[tid]['type']=='audio']
-    for idx, aud_id in enumerate(audio_items):
-        item = track_map[aud_id]
-        path = item['details']['src']
-        input_files.append(path)
-        map_audio.append(f"-map {len(video_labels)+len(image_items)+idx}:a")
-    
-    # Combine filter complex
-    filter_complex = "".join(filter_parts).rstrip(';')
-    
-    # Final FFmpeg command
-    cmd = ["ffmpeg", "-y"]
-    for f in input_files:
-        cmd += ["-i", f]
-    cmd += ["-filter_complex", filter_complex]
-    cmd += map_audio
-    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(resolve_fps(design))]
-    cmd += ["-t", str(duration), "output_preview.mp4"]
-    
-    # Return safe shell command
-    return " ".join(shlex.quote(c) for c in cmd)
-
 def parse_scale(transform_str: str) -> float:
     if not transform_str or transform_str == "none":
         return 1.0
     try:
-        # scale(0.32, 0.32) -> 0.32, 0.32
         inner = transform_str.replace("scale(", "").replace(")", "")
-        # Split by comma and take the first value
         first_val = inner.split(",")[0].strip()
         return float(first_val)
     except Exception:
@@ -672,9 +659,10 @@ def normalize_media_src(src: str) -> str:
     return abs_media_path(src)
 
 def write_text_temp(text: str) -> str:
-    ensure_dir(MEDIA_ROOT)
+    temp_dir = current_render_temp_dir.get() or MEDIA_ROOT
+    ensure_dir(temp_dir)
     name = f"text_{uuid.uuid4().hex}.txt"
-    path = os.path.abspath(os.path.join(MEDIA_ROOT, name))
+    path = os.path.abspath(os.path.join(temp_dir, name))
     with open(path, "w", encoding="utf-8") as f:
         f.write(text or "")
     return path
@@ -692,13 +680,47 @@ def to_even(value, min_value=2):
 
 def parse_px(value):
     if isinstance(value, str):
-        # Kuch cases mein value '0.32, 0.32' bhi aa sakti hai transform error ki wajah se
         clean_val = value.replace('px', '').split(',')[0].strip()
         try:
             return float(clean_val)
         except:
             return 0.0
     return float(value) if value is not None else 0.0
+
+def resolve_overlay_position(details: dict, orig_w: float, orig_h: float, scaled_w: float, scaled_h: float):
+    """
+    Convert editor position data into FFmpeg overlay x/y expressions.
+
+    When an item is scaled, the editor keeps the scaled media centered inside
+    its original box. Apply that same center offset from whichever edge is used.
+    """
+    if not isinstance(details, dict):
+        details = {}
+
+    position = get_object_position(details)
+    x_offset = (orig_w - scaled_w) / 2
+    y_offset = (orig_h - scaled_h) / 2
+
+    left = safe_float(details.get("left", 0)) + x_offset
+    top = safe_float(details.get("top", 0)) + y_offset
+    right = safe_float(details.get("right", 0)) + x_offset
+    bottom = safe_float(details.get("bottom", 0)) + y_offset
+
+    if "right" in position:
+        x_expr = f"W-w-({right})"
+    elif position in ("center", "middle", "center-center"):
+        x_expr = f"(W-w)/2+({left})"
+    else:
+        x_expr = f"{left}"
+
+    if "bottom" in position:
+        y_expr = f"H-h-({bottom})"
+    elif position in ("center", "middle", "center-center"):
+        y_expr = f"(H-h)/2+({top})"
+    else:
+        y_expr = f"{top}"
+
+    return x_expr, y_expr
 
 def safe_float(val):
     if val is None: return 0.0
@@ -707,7 +729,192 @@ def safe_float(val):
         return float(clean_val)
     except (ValueError, IndexError):
         return 0.0
-    
+
+def get_object_fit(details: dict, media_type: str = "") -> str:
+    value = (
+        details.get("objectFit")
+        or details.get("object-fit")
+        or details.get("fit")
+        or ""
+    )
+    value = str(value).strip().lower()
+    if value in ("cover", "contain", "fill"):
+        return value
+    if details.get("isBackground") or media_type == "video":
+        return "cover"
+    return "contain"
+
+def get_object_position(details: dict) -> str:
+    value = (
+        details.get("objectPosition")
+        or details.get("object-position")
+        or details.get("position")
+        or "center"
+    )
+    return str(value).replace("_", "-").lower()
+
+def is_box_anchored_position(details: dict) -> bool:
+    position = get_object_position(details)
+    return any(anchor in position for anchor in ("left", "right", "top", "bottom"))
+
+def resolve_overlay_xy(details: dict, slot_w: float, slot_h: float, render_w: int, render_h: int, center_scaled: bool = False):
+    raw_left = safe_float(details.get("left", 0))
+    raw_top = safe_float(details.get("top", 0))
+    position = get_object_position(details)
+
+    if center_scaled and not is_box_anchored_position(details):
+        left = raw_left + (slot_w - render_w) / 2
+    elif "right" in position:
+        left = raw_left + slot_w - render_w
+    else:
+        left = raw_left
+
+    if center_scaled and not is_box_anchored_position(details):
+        top = raw_top + (slot_h - render_h) / 2
+    elif "bottom" in position:
+        top = raw_top + slot_h - render_h
+    else:
+        top = raw_top
+
+    return left, top
+
+def build_positioned_image_filter(slot_w: int, slot_h: int, details: dict, style_chain: str) -> str:
+    if not is_box_anchored_position(details):
+        return f"scale={slot_w}:{slot_h}:force_original_aspect_ratio=decrease{style_chain}"
+
+    slot_w = max(2, to_even(slot_w))
+    slot_h = max(2, to_even(slot_h))
+    position = get_object_position(details)
+    scale_filter = f"scale={slot_w}:{slot_h}:force_original_aspect_ratio=decrease{style_chain}"
+
+    if "right" in position:
+        pad_x = "ow-iw"
+    elif "left" in position:
+        pad_x = "0"
+    else:
+        pad_x = "(ow-iw)/2"
+
+    if "bottom" in position:
+        pad_y = "oh-ih"
+    elif "top" in position:
+        pad_y = "0"
+    else:
+        pad_y = "(oh-ih)/2"
+
+    return f"{scale_filter},format=rgba,pad={slot_w}:{slot_h}:{pad_x}:{pad_y}:color=0x00000000"
+
+def build_cover_visual_filter(slot_w: int, slot_h: int, style_chain: str, details: dict | None = None) -> str:
+    slot_w = max(2, to_even(slot_w))
+    slot_h = max(2, to_even(slot_h))
+    position = get_object_position(details or {})
+
+    if "left" in position:
+        crop_x = "0"
+    elif "right" in position:
+        crop_x = "iw-ow"
+    else:
+        crop_x = "(iw-ow)/2"
+
+    if "top" in position:
+        crop_y = "0"
+    elif "bottom" in position:
+        crop_y = "ih-oh"
+    else:
+        crop_y = "(ih-oh)/2"
+
+    return (
+        f"scale={slot_w}:{slot_h}:force_original_aspect_ratio=increase,"
+        f"crop={slot_w}:{slot_h}:{crop_x}:{crop_y}{style_chain}"
+    )
+
+def build_visual_fit_filter(slot_w: int, slot_h: int, details: dict, style_chain: str, media_type: str = "") -> str:
+    fit = get_object_fit(details, media_type)
+    slot_w = max(2, to_even(slot_w))
+    slot_h = max(2, to_even(slot_h))
+
+    if fit == "fill":
+        return f"scale={slot_w}:{slot_h}{style_chain}"
+
+    if fit == "cover":
+        return build_cover_visual_filter(slot_w, slot_h, style_chain, details)
+
+    return build_positioned_image_filter(slot_w, slot_h, details, style_chain)
+
+def sync_track_item_bounds(design: dict) -> dict:
+    if not isinstance(design, dict):
+        return design
+
+    canvas_w, canvas_h = resolve_canvas_size(design)
+    track_items_map = design.get("trackItemsMap")
+    if not isinstance(track_items_map, dict):
+        return design
+
+    for item in track_items_map.values():
+        if not isinstance(item, dict):
+            continue
+        details = item.get("details")
+        if not isinstance(details, dict):
+            continue
+
+        width = safe_float(details.get("width", 0))
+        height = safe_float(details.get("height", 0))
+        if width <= 0:
+            width = float(canvas_w)
+        if height <= 0:
+            height = float(canvas_h)
+
+        scale = parse_scale(details.get("transform", "scale(1)"))
+        render_w = width * scale
+        render_h = height * scale
+        left = safe_float(details.get("left", 0))
+        top = safe_float(details.get("top", 0))
+
+        details["right"] = float(canvas_w) - (left + render_w)
+        details["bottom"] = float(canvas_h) - (top + render_h)
+        item["details"] = details
+
+    return design
+
+
+def build_visual_effect_filters_after_scale(details: dict) -> str:
+    """
+    FFmpeg filters applied after scale (before setpts), matching editor JSON:
+      - flipX / flipY
+      - blur (details.blur — treated as ~px-ish strength → gblur sigma)
+      - brightness (details.brightness — percent, 100 = unchanged; CSS-like multiply via colorchannelmixer)
+      - opacity (percent, merged with brightness in one colorchannelmixer when needed)
+    """
+    if not isinstance(details, dict):
+        details = {}
+
+    parts: list[str] = []
+
+    if details.get("flipX"):
+        parts.append("hflip")
+    if details.get("flipY"):
+        parts.append("vflip")
+
+    blur_val = safe_float(details.get("blur", 0))
+    if blur_val > 0:
+        sigma = min(30.0, max(0.3, blur_val * 0.18))
+        parts.append(f"gblur=sigma={sigma:.3f}")
+
+    b_pct = safe_float(details.get("brightness", 100))
+    m = max(0.01, min(3.0, b_pct / 100.0))
+    op = safe_float(details.get("opacity", 100)) / 100.0
+    op = max(0.0, min(1.0, op))
+
+    if abs(m - 1.0) > 0.001 or op < 0.999:
+        if op < 0.999:
+            parts.append("format=rgba")
+        parts.append(
+            f"colorchannelmixer=rr={m:.6f}:gg={m:.6f}:bb={m:.6f}:aa={op:.6f}"
+        )
+
+    if not parts:
+        return ""
+    return "," + ",".join(parts)
+
 def render_image_preview(template_json, customer, company, output_path):
     design = template_json.get("design", {}) if isinstance(template_json, dict) else {}
     canvas_w, canvas_h = resolve_canvas_size(design)
@@ -721,36 +928,38 @@ def render_image_preview(template_json, customer, company, output_path):
     track_item_ids = design.get("trackItemIds", []) if isinstance(design, dict) else []
     ordered_ids = track_item_ids if track_item_ids else list(track_items_map.keys())
 
-    # -----------------------------
-    # Collect background + images in order
-    # -----------------------------
     bg_item = find_background(template_json)
     if bg_item and bg_item.get("type") != "image":
-        # For image preview we do NOT support video background
         bg_item = None
 
     inputs: list[str] = []
     filter_parts: list[str] = []
-
     current = "[base]"
 
+    # -------------------------------------------------------
+    # Background — ✅ validate before adding to inputs
+    # -------------------------------------------------------
     if bg_item:
         bg_src = smart_logo_mapping(bg_item.get("details", {}).get("src", ""))
         bg_src = replace_placeholders(bg_src, context)
-        bg_src = normalize_media_src(bg_src)
-        if bg_src:
+        bg_src = normalize_media_src(bg_src) if bg_src else ""
+
+        if is_valid_src(bg_src, label="background"):
             inputs.append(bg_src)
-            # Cover fill (like CSS background-size: cover)
+            bg_style = build_visual_effect_filters_after_scale(bg_item.get("details", {}))
             filter_parts.append(
                 f"[0:v]scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=increase,"
-                f"crop={canvas_w}:{canvas_h}[base]"
+                f"crop={canvas_w}:{canvas_h}{bg_style}[base]"
             )
         else:
+            print(f"   ⚠️ Background src invalid/missing — using black canvas fallback")
             filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}[base]")
     else:
         filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}[base]")
 
-    # Image overlays (contain, positioned like editor)
+    # -------------------------------------------------------
+    # Image overlays — ✅ FIXED OVERLAY POSITIONING LOGIC
+    # -------------------------------------------------------
     overlay_idx = 0
     for item_id in ordered_ids:
         item = track_items_map.get(item_id, {})
@@ -762,43 +971,47 @@ def render_image_preview(template_json, customer, company, output_path):
 
         src = smart_logo_mapping(details.get("src", ""))
         src = replace_placeholders(src, context)
-        src = normalize_media_src(src)
-        if not src:
+        src = normalize_media_src(src) if src else ""
+
+        if not is_valid_src(src, label=f"image overlay [{item_id}]"):
             continue
 
         inputs.append(src)
-        in_idx = len(inputs) - 1  # actual input index in ffmpeg cmd
+        in_idx = len(inputs) - 1
 
         scale = parse_scale(details.get("transform", "scale(1)"))
+        
+        # 🟢 FIX 1: Default fallback width/height 150px/150px rakha hai (Canvas W nahi)
         orig_w = safe_float(details.get("width", canvas_w)) or canvas_w
         orig_h = safe_float(details.get("height", canvas_h)) or canvas_h
 
         tw = max(2, to_even(orig_w * scale))
         th = max(2, to_even(orig_h * scale))
+        x_expr, y_expr = resolve_overlay_position(details, orig_w, orig_h, tw, th)
+        box_w = tw
+        box_h = th
 
-        left = safe_float(details.get("left", 0)) + (orig_w - tw) / 2
-        top = safe_float(details.get("top", 0)) + (orig_h - th) / 2
+        # 🟢 FIX 2: Exact left & top positions parse ho rahi hain
+        # Scale center adjustment
+        left, top = resolve_overlay_xy(details, orig_w, orig_h, box_w, box_h, center_scaled=True)
 
-        opacity = safe_float(details.get("opacity", 100)) / 100.0
-        opacity_filter = ""
-        if opacity < 1.0:
-            opacity_filter = f",format=rgba,colorchannelmixer=aa={opacity:.3f}"
+        style_chain = build_visual_effect_filters_after_scale(details)
+        image_filter = build_visual_fit_filter(box_w, box_h, details, style_chain, "image")
 
         sc = f"[img_sc{overlay_idx}]"
         ov = f"[img_ov{overlay_idx}]"
         filter_parts.append(
-            f"[{in_idx}:v]scale={tw}:{th}:force_original_aspect_ratio=decrease{opacity_filter},setpts=PTS-STARTPTS{sc}"
+          f"[{in_idx}:v]{image_filter},setpts=PTS-STARTPTS{sc}"
         )
         filter_parts.append(
-            f"{current}{sc}overlay={left}:{top}{ov}"
+            f"{current}{sc}overlay={x_expr}:{y_expr}{ov}"
         )
         current = ov
         overlay_idx += 1
 
-    # -----------------------------
-    # Text overlays (use same text engine as video)
-    # Force visible at t=0
-    # -----------------------------
+    # -------------------------------------------------------
+    # Text overlays
+    # -------------------------------------------------------
     txt_idx = 0
     duration = 1.0
     for item_id in ordered_ids:
@@ -820,18 +1033,15 @@ def render_image_preview(template_json, customer, company, output_path):
             canvas_h=canvas_h,
         )
 
-    # -----------------------------
-    # FFmpeg execution (JPEG)
-    # -----------------------------
+    # -------------------------------------------------------
+    # FFmpeg execution
+    # -------------------------------------------------------
     cmd = ["ffmpeg", "-y"]
     for src in inputs:
-        # Loop still images so they always have a frame at t=0
         cmd += ["-loop", "1", "-i", src]
 
-    # Ensure the output path uses forward slashes (ffmpeg on Windows can be picky)
     output_path = str(output_path).replace("\\", "/")
 
-    # Force image2 muxer and single frame output
     cmd += [
         "-filter_complex", ";".join(filter_parts),
         "-map", current,
@@ -842,34 +1052,28 @@ def render_image_preview(template_json, customer, company, output_path):
         output_path,
     ]
 
-    # Debug: print ffmpeg command
     try:
         print("Render image FFmpeg command:", " ".join(shlex.quote(c) for c in cmd))
     except Exception:
         print("Render image FFmpeg command:", cmd)
 
-    subprocess.run(cmd, check=True)
-
-    # Return the executed command string for debugging
+    _run_with_resolved_exec(cmd, exec_name="ffmpeg", env_var="FFMPEG_BIN", check=True)
     return " ".join(shlex.quote(c) for c in cmd)
 
 def render_preview(template_json, context_data=None, output_path=None):
     if output_path is None and isinstance(context_data, str):
         output_path = context_data
         context_data = None
-    # context_data contains both customer and company info
-    # Structure: {"customer": {...}, "company": {...}}
+
     if isinstance(context_data, dict) and "customer" in context_data and "company" in context_data:
         customer = context_data.get("customer")
         company = context_data.get("company")
-        context = context_data  # Use the full context dict for replacements
+        context = context_data
     else:
-        # Fallback for legacy calls
         customer = context_data if isinstance(context_data, dict) else {}
         company = {}
         context = {"customer": customer, "company": company}
     
-    # Allow passing full template or template_json only
     if isinstance(template_json, dict) and "template_json" in template_json:
         full_template = template_json
         template_json = full_template.get("template_json", {})
@@ -899,120 +1103,67 @@ def render_preview(template_json, context_data=None, output_path=None):
     audio_inputs = []
 
     # -------------------------------------------------
-    # 1️⃣ COLLECT INPUTS (VIDEO / IMAGE / AUDIO)
+    # 1️⃣ COLLECT INPUTS — ✅ validate src before adding
     # -------------------------------------------------
     track_item_ids = design.get("trackItemIds", [])
     ordered_visual_ids = [tid for tid in track_item_ids if track_items_map.get(tid, {}).get("type") in ["video", "image"]]
 
+    def _collect_visual(item_id, fallback_type=None):
+        """Resolve, validate and return a visual input dict, or None to skip."""
+        item = track_items_map.get(item_id, {})
+        details = item.get("details", {})
+        item_type = item.get("type") or fallback_type or "unknown"
+
+        src_raw = details.get("src", "")
+        src_raw = smart_logo_mapping(src_raw)
+        src = replace_placeholders(src_raw, context)
+        src = normalize_media_src(src) if src else ""
+
+        # ✅ Central validation — skips empty, placeholders, missing files
+        if not is_valid_src(src, label=f"{item_type} [{item_id}]"):
+            return None
+
+        return {"src": src, "item": item, "media_type": item_type}
+
+    def _collect_audio(item_id, fallback_type=None):
+        """Resolve, validate and return an audio input dict, or None to skip."""
+        item = track_items_map.get(item_id, {})
+        details = item.get("details", {})
+        src_raw = details.get("src", "")
+        src = replace_placeholders(src_raw, context)
+        src = normalize_media_src(src) if src else ""
+
+        # ✅ Central validation
+        if not is_valid_src(src, label=f"audio [{item_id}]"):
+            return None
+
+        return {"src": src, "item": item}
+
     if ordered_visual_ids:
         for item_id in ordered_visual_ids:
-            item = track_items_map.get(item_id, {})
-            details = item.get("details", {})
-            src_got = details.get("src", "")
-            item_type = item.get("type", "unknown")
-            # Smart mapping for dummy placeholder URLs
-            src_got = smart_logo_mapping(src_got)
-            if src_got.startswith("{{"):
-                print(f"   → Smart mapped to: {src_got}")
-            
-            src = replace_placeholders(src_got, context)
-            
-            if not src:
-                print(f"   ⚠️ Skipping - no src after replacement")
-                continue
-            
-            abs_src = normalize_media_src(src)
-            print(f"   Normalized path: {abs_src}")
-            
-            # Try to verify file exists, but don't skip on failure
-            if abs_src.startswith("http"):
-                print(f"   ℹ️ Remote URL - Will attempt to use")
-            else:
-                try:
-                    ensure_file_exists(abs_src)
-                    print(f"   ✓ File exists: {abs_src}")
-                except FileNotFoundError as e:
-                    print(f"   ⚠️ File NOT found: {abs_src} - Will try anyway")
-            
-            visual_inputs.append({
-                "src": abs_src,
-                "item": item,
-                "media_type": item_type
-            })
+            result = _collect_visual(item_id)
+            if result:
+                visual_inputs.append(result)
 
-        # Collect audio from trackItemIds (MP3 etc.) - same order as design
         for item_id in track_item_ids:
             item = track_items_map.get(item_id, {})
             if item.get("type") != "audio":
                 continue
-            details = item.get("details", {})
-            src_got = details.get("src", "")
-            src = replace_placeholders(src_got, context)
-            if not src:
-                continue
-            abs_src = normalize_media_src(src)
-            if abs_src.startswith("http"):
-                pass  # Will attempt
-            else:
-                try:
-                    ensure_file_exists(abs_src)
-                except FileNotFoundError:
-                    pass
-            audio_inputs.append({"src": abs_src, "item": item})
+            result = _collect_audio(item_id)
+            if result:
+                audio_inputs.append(result)
     else:
         for track in tracks:
             ttype = track.get("type")
             for item_id in track.get("items", []):
-                item = track_items_map.get(item_id, {})
-                details = item.get("details", {})
-                src_got = details.get("src", "")
-                
                 if ttype in ["video", "image"]:
-                    
-                    # Smart mapping for dummy placeholder URLs
-                    src_got = smart_logo_mapping(src_got)
-                    if src_got.startswith("{{"):
-                        print(f"   → Smart mapped to: {src_got}")
-                    
-                    src = replace_placeholders(src_got, context)
-                    print(f"   After placeholder: {src}")
-                    
-                    if not src:
-                        print(f"   ⚠️ Skipping - no src after replacement")
-                        continue
-                    
-                    abs_src = normalize_media_src(src)
-                    print(f"   Normalized path: {abs_src}")
-                    
-                    if abs_src.startswith("http"):
-                        print(f"   ℹ️ Remote URL - Will attempt to use")
-                    else:
-                        try:
-                            ensure_file_exists(abs_src)
-                            print(f"   ✓ File exists: {abs_src}")
-                        except FileNotFoundError as e:
-                            print(f"   ⚠️ File NOT found: {abs_src} - Will try anyway")
-                    
-                    visual_inputs.append({
-                        "src": abs_src,
-                        "item": item,
-                        "media_type": ttype
-                    })
-                    
+                    result = _collect_visual(item_id, fallback_type=ttype)
+                    if result:
+                        visual_inputs.append(result)
                 elif ttype == "audio":
-                    src = replace_placeholders(src_got, context)
-                    if not src:
-                        continue
-                    abs_src = normalize_media_src(src)
-                    if not abs_src.startswith("http"):
-                        try:
-                            ensure_file_exists(abs_src)
-                        except FileNotFoundError:
-                            pass  # Will try anyway
-                    audio_inputs.append({
-                        "src": abs_src,
-                        "item": item
-                    })
+                    result = _collect_audio(item_id)
+                    if result:
+                        audio_inputs.append(result)
 
     # -------------------------------------------------
     # 2️⃣ BASE CANVAS
@@ -1033,41 +1184,64 @@ def render_preview(template_json, context_data=None, output_path=None):
         start = display.get("from", 0) / 1000
         end = display.get("to", duration * 1000) / 1000
 
+        # Old Code
+
+        # scale = parse_scale(details.get("transform", "scale(1)"))
+        # orig_w = safe_float(details.get("width", canvas_w))
+        # orig_h = safe_float(details.get("height", canvas_h))
+
+        # tw = to_even(orig_w * scale)
+        # th = to_even(orig_h * scale)
+        
+        # left = safe_float(details.get("left", 0)) + (orig_w - tw) / 2
+        # top = safe_float(details.get("top", 0)) + (orig_h - th) / 2
+        # Finished old code
+        # New Code
+        orig_w = safe_float(details.get("width", 0))
+        orig_h = safe_float(details.get("height", 0))
+
+        if orig_w <= 0:
+            orig_w = 200.0
+        if orig_h <= 0:
+            orig_h = 200.0
+
         scale = parse_scale(details.get("transform", "scale(1)"))
-        orig_w = safe_float(details.get("width", canvas_w))
-        orig_h = safe_float(details.get("height", canvas_h))
 
         tw = to_even(orig_w * scale)
         th = to_even(orig_h * scale)
+        is_image_input = (data.get("media_type") or "").lower() == "image"
+        box_w = tw
+        box_h = th
 
-        left = safe_float(details.get("left", 0)) + (orig_w - tw) / 2
-        top = safe_float(details.get("top", 0)) + (orig_h - th) / 2
+        x_expr, y_expr = resolve_overlay_position(details, orig_w, orig_h, box_w, box_h)
 
         sc = f"sc{idx}"
         ov = f"ov{idx}"
 
-        opacity = safe_float(details.get("opacity", 100)) / 100.0
-        opacity_filter = ""
-        if opacity < 1.0:
-            opacity_filter = f",format=rgba,colorchannelmixer=aa={opacity:.3f}"
+        style_chain = build_visual_effect_filters_after_scale(details)
+        media_type = "image" if is_image_input else "video"
+        visual_filter = build_visual_fit_filter(box_w, box_h, details, style_chain, media_type)
 
         filter_parts.append(
-            f"[{idx}:v]scale={tw}:{th}:force_original_aspect_ratio=decrease{opacity_filter},setpts=PTS-STARTPTS+{start}/TB[{sc}]"
+            f"[{idx}:v]{visual_filter},setpts=PTS-STARTPTS+{start}/TB[{sc}]"
         )
         filter_parts.append(
-            f"{last_label}[{sc}]overlay={left}:{top}:enable='between(t,{start},{end})'[{ov}]"
+            f"{last_label}[{sc}]overlay={x_expr}:{y_expr}:enable='between(t,{start},{end})'[{ov}]"
         )
 
         last_label = f"[{ov}]"
 
     # -------------------------------------------------
-    # 4️⃣ TEXT FILTERS
+    # 4️⃣ TEXT FILTERS (from tracks + any text items only in trackItemIds)
     # -------------------------------------------------
     txt_idx = 0
+    text_ids_done: set[str] = set()
     for track in tracks:
         if track.get("type") == "text":
             for item_id in track.get("items", []):
                 item = track_items_map.get(item_id, {})
+                if not item.get("details", {}).get("text"):
+                    continue
                 last_label, txt_idx = add_text_item_filters(
                     filter_parts,
                     last_label,
@@ -1078,9 +1252,30 @@ def render_preview(template_json, context_data=None, output_path=None):
                     canvas_w=canvas_w,
                     canvas_h=canvas_h,
                 )
+                text_ids_done.add(str(item_id))
 
+    for item_id in track_item_ids:
+        sid = str(item_id)
+        if sid in text_ids_done:
+            continue
+        item = track_items_map.get(item_id, {})
+        if item.get("type") != "text":
+            continue
+        if not item.get("details", {}).get("text"):
+            continue
+        last_label, txt_idx = add_text_item_filters(
+            filter_parts,
+            last_label,
+            item,
+            duration,
+            txt_idx,
+            context,
+            canvas_w=canvas_w,
+            canvas_h=canvas_h,
+        )
+        text_ids_done.add(sid)
     # -------------------------------------------------
-    # 5️⃣ AUDIO FILTERS (SAFE & DYNAMIC)
+    # 5️⃣ AUDIO FILTERS
     # -------------------------------------------------
     audio_sources = []
     has_external_audio = len(audio_inputs) > 0
@@ -1100,7 +1295,6 @@ def render_preview(template_json, context_data=None, output_path=None):
             vol = safe_float(v["item"].get("details", {}).get("volume", 100)) / 100.0
             if vol <= 0:
                 continue
-            # When mixing with MP3, lower video volume so both play together
             if has_external_audio and vol > 0.5:
                 vol = 0.4
             audio_sources.append({
@@ -1161,12 +1355,10 @@ def render_preview(template_json, context_data=None, output_path=None):
     # -------------------------------------------------
     # 6️⃣ BUILD FFMPEG COMMAND
     # -------------------------------------------------
-    
-    if not visual_inputs:
-        print("   ⚠️ WARNING: No visual inputs collected!")
+    print(f"   Visual inputs after validation: {len(visual_inputs)}")
     for i, v in enumerate(visual_inputs):
         print(f"     [{i}] {v['media_type'].upper()}: {v['src']}")
-    print(f"   Audio inputs: {len(audio_inputs)}")
+    print(f"   Audio inputs after validation: {len(audio_inputs)}")
     for i, a in enumerate(audio_inputs):
         print(f"     [{i}] AUDIO: {a['src']}")
     print("=" * 80 + "\n")
@@ -1199,14 +1391,13 @@ def render_preview(template_json, context_data=None, output_path=None):
         "-t", str(duration),
         output_path
     ]
-    # Debug: print ffmpeg command
+
     try:
         print("Render video FFmpeg command:", " ".join(shlex.quote(c) for c in cmd))
     except Exception:
         print("Render video FFmpeg command:", cmd)
 
-    subprocess.run(cmd, check=True)
-
+    _run_with_resolved_exec(cmd, exec_name="ffmpeg", env_var="FFMPEG_BIN", check=True)
     return " ".join(shlex.quote(c) for c in cmd)
 
 def render_video(task_id: str):
@@ -1219,7 +1410,10 @@ def render_video(task_id: str):
 
     text = customer["full_name"]
 
-    output_path = os.path.join(MEDIA_ROOT, f"{task_id}.mp4")
+    folder = ensure_media_folder(
+        template.get("folder_path") or template_folder_path(str(template.get("company_id")), str(template["_id"]))
+    )
+    output_path = get_media_abs_path(f"{folder}/{task_id}.mp4")
 
     vf = (
         f"drawtext="
@@ -1241,6 +1435,91 @@ def render_video(task_id: str):
     ]
 
     print("SIMPLE CMD:", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    _run_with_resolved_exec(cmd, exec_name="ffmpeg", env_var="FFMPEG_BIN", check=True)
 
     return output_path
+
+def generate_ffmpeg_cmd(template):
+    design = template['template_json']['design']
+    track_map = design['trackItemsMap']
+    duration = template.get('duration', 10)
+    canvas_w, canvas_h = resolve_canvas_size(design)
+    
+    filter_parts = []
+    input_files = []
+    map_audio = []
+    
+    filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base];")
+    last_label = "[base]"
+    
+    video_labels = []
+    for idx, vid_id in enumerate([tid for tid in design['trackItemIds'] if track_map[tid]['type']=='video']):
+        item = track_map[vid_id]
+        path = item['details']['src']
+        # ✅ Validate before using
+        if not is_valid_src(path, label=f"video [{vid_id}]"):
+            continue
+        input_files.append(path)
+        start = item.get('display', {}).get('from', 0)/1000
+        end = item.get('display', {}).get('to', duration*1000)/1000
+        scale_factor = parse_scale(item['details'].get('transform', 'scale(1)'))
+        orig_w = float(item['details'].get('width', canvas_w))
+        orig_h = float(item['details'].get('height', canvas_h))
+        scaled_w = orig_w * scale_factor
+        scaled_h = orig_h * scale_factor
+        left = float(parse_px(item['details'].get('left', 0)))
+        top = float(parse_px(item['details'].get('top', 0)))
+        left = left + (orig_w - scaled_w) / 2
+        top = top + (orig_h - scaled_h) / 2
+        vstyle = build_visual_effect_filters_after_scale(item.get("details", {}))
+        video_filter = build_visual_fit_filter(scaled_w, scaled_h, item.get("details", {}), vstyle, "video")
+        filter_parts.append(f"[{idx}:v]{video_filter},setpts=PTS-STARTPTS[v{idx}];")
+        filter_parts.append(f"{last_label}[v{idx}]overlay={left}:{top}:enable='between(t,{start},{end})'[o{idx}];")
+        last_label = f"[o{idx}]"
+        video_labels.append(last_label)
+    
+    image_items = [tid for tid in design['trackItemIds'] if track_map[tid]['type']=='image']
+    for idx, img_id in enumerate(image_items):
+        item = track_map[img_id]
+        path = item['details']['src']
+        # ✅ Validate before using
+        if not is_valid_src(path, label=f"image [{img_id}]"):
+            continue
+        input_files.append(path)
+        start = item['display']['from']/1000
+        end = item['display']['to']/1000
+        scale_x = parse_scale(item['details'].get('transform', 'scale(1)'))
+        orig_w = float(item['details'].get('width', 0) or canvas_w)
+        orig_h = float(item['details'].get('height', 0) or canvas_h)
+        scaled_w = orig_w * scale_x
+        scaled_h = orig_h * scale_x
+        box_w = max(2, to_even(scaled_w))
+        box_h = max(2, to_even(scaled_h))
+        x, y = resolve_overlay_xy(item.get("details", {}), orig_w, orig_h, box_w, box_h, center_scaled=True)
+        istyle = build_visual_effect_filters_after_scale(item.get("details", {}))
+        image_filter = build_visual_fit_filter(box_w, box_h, item.get("details", {}), istyle, "image")
+        filter_parts.append(f"[{len(video_labels)+idx}:v]{image_filter},setpts=PTS-STARTPTS[vimg{idx}];")
+        filter_parts.append(f"{last_label}[vimg{idx}]overlay={x}:{y}:enable='between(t,{start},{end})'[oimg{idx}];")
+        last_label = f"[oimg{idx}]"
+    
+    audio_items = [tid for tid in design['trackItemIds'] if track_map[tid]['type']=='audio']
+    for idx, aud_id in enumerate(audio_items):
+        item = track_map[aud_id]
+        path = item['details']['src']
+        # ✅ Validate before using
+        if not is_valid_src(path, label=f"audio [{aud_id}]"):
+            continue
+        input_files.append(path)
+        map_audio.append(f"-map {len(video_labels)+len(image_items)+idx}:a")
+    
+    filter_complex = "".join(filter_parts).rstrip(';')
+    
+    cmd = ["ffmpeg", "-y"]
+    for f in input_files:
+        cmd += ["-i", f]
+    cmd += ["-filter_complex", filter_complex]
+    cmd += map_audio
+    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", str(resolve_fps(design))]
+    cmd += ["-t", str(duration), os.path.join(MEDIA_ROOT, f"output_preview_{uuid.uuid4().hex}.mp4")]
+    
+    return " ".join(shlex.quote(c) for c in cmd)

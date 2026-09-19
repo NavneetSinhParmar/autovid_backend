@@ -1,20 +1,43 @@
 import re
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi import Query
-from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from datetime import datetime
 from bson import ObjectId
 import json
+import asyncio
+import shutil
+from copy import deepcopy
 from app.db.connection import db
 from app.utils.auth import require_roles,get_current_user
-from app.services.video_renderer import render_preview,render_image_preview
+from app.services.video_renderer import render_preview, render_image_preview, sync_track_item_bounds
 from app.utils.placeholders import replace_placeholders
 from app.services.kokoro_tts import synthesize_and_store_media
 from app.services.url import build_media_url
+from app.services.storage import (
+    delete_media_folder,
+    ensure_media_folder,
+    get_media_abs_path,
+    template_folder_path,
+)
+from app.services.render_queue import run_render_job
 import uuid
 import os
 router = APIRouter(prefix="/templates", tags=["Templates"])
+
+
+def _template_folder(template: dict, template_id: str) -> str:
+    folder = template.get("folder_path")
+    if not folder:
+        company_id = template.get("company_id")
+        if not company_id:
+            raise HTTPException(status_code=400, detail="Template company_id missing")
+        folder = template_folder_path(str(company_id), template_id)
+    return ensure_media_folder(folder)
+
+
+def _template_output_path(template: dict, template_id: str, filename: str) -> str:
+    return get_media_abs_path(f"{_template_folder(template, template_id)}/{filename}")
 
 # ================= CREATE TEMPLATE =================
 @router.post("/")
@@ -38,6 +61,7 @@ async def create_template(
             design["fps"] = options["fps"]
         if "size" not in design:
             design["size"] = {"width": 1920, "height": 1080}
+        sync_track_item_bounds(design)
         template_json["design"] = design
 
     template_doc = {
@@ -59,10 +83,17 @@ async def create_template(
     }
 
     result = await db.templates.insert_one(template_doc)
+    template_id = str(result.inserted_id)
+    folder_path = ensure_media_folder(template_folder_path(str(company["_id"]), template_id))
+    await db.templates.update_one(
+        {"_id": result.inserted_id},
+        {"$set": {"folder_path": folder_path}}
+    )
 
     return {
         "message": "Template created successfully",
-        "template_id": str(result.inserted_id)
+        "template_id": template_id,
+        "folder_path": folder_path
     }
 
 # ================= LIST TEMPLATES =================
@@ -152,10 +183,19 @@ async def update_template(
 @router.delete("/{template_id}")
 async def delete_template(template_id: str):
 
-    await db.templates.update_one(
-        {"_id": ObjectId(template_id)},
-        {"$set": {"status": "deleted"}}
-    )
+    template = await db.templates.find_one({"_id": ObjectId(template_id)})
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    await db.templates.delete_one({"_id": ObjectId(template_id)})
+    await db.media.delete_many({"template_id": template_id})
+    await db.video_tasks.delete_many({
+        "$or": [
+            {"template_id": template_id},
+            {"template_id": ObjectId(template_id)},
+        ]
+    })
+    delete_media_folder(_template_folder(template, template_id))
 
     return {"message": "Template deleted"}
 
@@ -170,9 +210,8 @@ async def preview_template(template_id: str):
     company_data = None
     if company_id:
         company_data = await db.companies.find_one({"_id": ObjectId(company_id)})
+        company_data = await hydrate_company_email(company_data)
 
-    media_dir = os.path.abspath("media")
-    os.makedirs(media_dir, exist_ok=True)
     template_type = str(template.get("type", "video")).lower()
 
     try:
@@ -189,25 +228,39 @@ async def preview_template(template_id: str):
         # IMAGE template -> JPEG
         if template_type in ("img", "image"):
             preview_filename = f"{template_id}_preview.jpg"
-            preview_path = os.path.join(media_dir, preview_filename)
-            await run_in_threadpool(
-                render_image_preview,
-                template["template_json"],
-                {},
-                company_context,
-                preview_path,
-            )
+            preview_path = _template_output_path(template, template_id, preview_filename)
+            tpl_json = deepcopy(template["template_json"])
+            company_snapshot = deepcopy(company_context)
+
+            async def work(job_id: str, output_path: str, _folder: str):
+                await asyncio.to_thread(
+                    render_image_preview,
+                    deepcopy(tpl_json),
+                    {},
+                    deepcopy(company_snapshot),
+                    output_path,
+                )
+                shutil.copyfile(output_path, preview_path)
+
+            await run_render_job(kind="image_preview", extension="jpg", work=work)
             return FileResponse(path=preview_path, media_type="image/jpeg", filename=preview_filename)
 
         # VIDEO template -> MP4
         preview_filename = f"{template_id}_preview.mp4"
-        preview_path = os.path.join(media_dir, preview_filename)
-        await run_in_threadpool(
-            render_preview,
-            template,
-            {"customer": {}, "company": company_context},
-            preview_path,
-        )
+        preview_path = _template_output_path(template, template_id, preview_filename)
+        template_snapshot = deepcopy(template)
+        company_snapshot = deepcopy(company_context)
+
+        async def work(job_id: str, output_path: str, _folder: str):
+            await asyncio.to_thread(
+                render_preview,
+                deepcopy(template_snapshot),
+                {"customer": {}, "company": deepcopy(company_snapshot)},
+                output_path,
+            )
+            shutil.copyfile(output_path, preview_path)
+
+        await run_render_job(kind="video_preview", extension="mp4", work=work)
         return FileResponse(path=preview_path, media_type="video/mp4", filename=preview_filename)
     except Exception as e:
         import traceback
@@ -256,10 +309,28 @@ def normalize_company(company: dict | None) -> dict:
 
     return {
         "company_name": company.get("company_name", ""),
+        "email": company.get("email", ""),
         "description": company.get("description", ""),        
         "mobile": company.get("mobile", ""),        
         "logo_url": company.get("logo_url", ""),   # image path / url
     }
+
+async def hydrate_company_email(company: dict | None) -> dict | None:
+    if not company or company.get("email"):
+        return company
+
+    user_id = company.get("user_id")
+    if not user_id:
+        return company
+
+    try:
+        user_doc = await db.users.find_one({"_id": ObjectId(str(user_id))}, {"email": 1})
+    except Exception:
+        user_doc = await db.users.find_one({"_id": str(user_id)}, {"email": 1})
+
+    if user_doc and user_doc.get("email"):
+        company["email"] = user_doc["email"]
+    return company
 
 PLACEHOLDER_RE = re.compile(r"\{\{?\s*([\w.]+)\s*\}?\}")
 
@@ -319,6 +390,7 @@ async def _apply_dynamic_audio_to_template(
     customer: dict,
     company: dict,
     company_id: str | None,
+    folder_path: str | None = None,
 ):
     """
     For every audio track item where:
@@ -401,6 +473,7 @@ async def _apply_dynamic_audio_to_template(
                 voisetext=resolved_text,
                 voice=str(voice),
                 speed=speed,
+                folder_path=folder_path,
             )
         except Exception as exc:
             print(f"[TTS] ERROR generating audio for track {tid}: {exc}")
@@ -427,6 +500,7 @@ async def _apply_dynamic_audio_to_template(
 
     # write back (mutates template_json in-place, caller already holds ref)
     design["trackItemsMap"] = track_map
+    sync_track_item_bounds(design)
     template_json["design"] = design
 
 @router.post("/{template_id}/preview/{customer_id}")
@@ -448,54 +522,67 @@ async def preview_template_customer(template_id: str, customer_id: str):
         company = await db.companies.find_one({
             "_id": ObjectId(customer["linked_company_id"])
         })
+        company = await hydrate_company_email(company)
 
     company = normalize_company(company) if company else {}
-
-    media_dir = os.path.abspath("media")
-    os.makedirs(media_dir, exist_ok=True)
 
     template_type = str(template.get("type", "video")).lower()
 
     # 🔀 IMAGE (img/image) -> JPEG
     if template_type in ("img", "image"):
         preview_filename = f"{template_id}_{customer_id}_preview.jpg"
-        preview_path = os.path.join(media_dir, preview_filename)
+        preview_path = _template_output_path(template, template_id, preview_filename)
+        tpl_json = deepcopy(template["template_json"])
+        customer_snapshot = deepcopy(customer)
+        company_snapshot = deepcopy(company)
 
-        await run_in_threadpool(
-            render_image_preview,
-            template["template_json"],
-            customer,
-            company,
-            preview_path
-        )
+        async def work(job_id: str, output_path: str, _folder: str):
+            await asyncio.to_thread(
+                render_image_preview,
+                deepcopy(tpl_json),
+                deepcopy(customer_snapshot),
+                deepcopy(company_snapshot),
+                output_path
+            )
+            shutil.copyfile(output_path, preview_path)
 
+        await run_render_job(kind="customer_image_preview", extension="jpg", work=work)
         return FileResponse(preview_path, media_type="image/jpeg", filename=preview_filename)
 
     # 🎥 VIDEO
     preview_filename = f"{template_id}_{customer_id}_preview.mp4"
-    preview_path = os.path.join(media_dir, preview_filename)
+    preview_path = _template_output_path(template, template_id, preview_filename)
 
     # ✅ Dynamic audio TTS (voisetext -> mp3) before rendering
-    tpl_json = template.get("template_json", {}) or {}
+    tpl_json = deepcopy(template.get("template_json", {}) or {})
+    template_snapshot = deepcopy(template)
+    customer_snapshot = deepcopy(customer)
+    company_snapshot = deepcopy(company)
     effective_company_id = template.get("company_id") or customer.get("linked_company_id")
-    await _apply_dynamic_audio_to_template(
-        tpl_json,
-        customer=customer,
-        company=company,
-        company_id=str(effective_company_id or ""),
-    )
-    template["template_json"] = tpl_json
 
-    await run_in_threadpool(
-        render_preview,
-        template,
-        {
-            "customer": customer,
-            "company": company
-        },
-        preview_path
-    )
+    async def work(job_id: str, output_path: str, folder: str):
+        job_template = deepcopy(template_snapshot)
+        job_tpl_json = deepcopy(tpl_json)
+        await _apply_dynamic_audio_to_template(
+            job_tpl_json,
+            customer=deepcopy(customer_snapshot),
+            company=deepcopy(company_snapshot),
+            company_id=str(effective_company_id or ""),
+            folder_path=folder,
+        )
+        job_template["template_json"] = job_tpl_json
+        await asyncio.to_thread(
+            render_preview,
+            job_template,
+            {
+                "customer": deepcopy(customer_snapshot),
+                "company": deepcopy(company_snapshot)
+            },
+            output_path
+        )
+        shutil.copyfile(output_path, preview_path)
 
+    await run_render_job(kind="customer_video_preview", extension="mp4", work=work)
     return FileResponse(preview_path, media_type="video/mp4")
 
 @router.get("/{template_id}/download/{customer_id}")
@@ -511,7 +598,7 @@ async def download_video(template_id: str, customer_id: str):
     media_type = "image/jpeg" if is_image else "video/mp4"
 
     filename = f"{template_id}_{customer_id}_preview.{ext}"
-    file_path = os.path.abspath(os.path.join("media", filename))
+    file_path = _template_output_path(template, template_id, filename)
 
     if not os.path.exists(file_path):
         raise HTTPException(

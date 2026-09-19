@@ -7,15 +7,21 @@ from fastapi.security import OAuth2PasswordBearer
 from app.db.connection import db
 from bson import ObjectId
 import os
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from fastapi import HTTPException
 from app.utils.constants import ALLOWED_ROLES
 
-load_dotenv()
+load_dotenv(find_dotenv())
 
 SECRET_KEY = os.getenv("SECRET_KEY")
-ALGORITHM = os.getenv("ALGORITHM")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
+ALGORITHM = os.getenv("ALGORITHM") or "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES") or 60)
+
+if not SECRET_KEY:
+    raise RuntimeError(
+        "SECRET_KEY environment variable is required for JWT generation. "
+        "Set SECRET_KEY in your environment or .env file."
+    )
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")

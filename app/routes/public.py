@@ -4,7 +4,7 @@ from app.db.connection import db
 from datetime import datetime
 from app.utils.auth import require_roles
 
-from app.services.storage import save_upload_file
+from app.services.storage import save_template_file
 
 router = APIRouter(prefix="/api/public", tags=["public"])
 
@@ -116,7 +116,7 @@ async def upload_media_for_template(
     # ---------------------------------------------------
     # 4️⃣ Save File
     # ---------------------------------------------------
-    local_path, size = await save_upload_file(file, company_id)
+    local_path, size = await save_template_file(file, company_id, template_id)
 
     # ---------------------------------------------------
     # 5️⃣ Create media document

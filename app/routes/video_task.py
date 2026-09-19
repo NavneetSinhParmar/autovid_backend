@@ -1,15 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime
 from bson import ObjectId
-import uuid
+import asyncio
+import shutil
+from copy import deepcopy
 
 from app.db.connection import db
 from app.utils.auth import require_roles
-from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 import os
 import json
 from app.services.video_renderer import render_preview
+from app.services.storage import ensure_media_folder, get_media_abs_path, template_folder_path
+from app.services.render_queue import run_render_job
 
 
 router = APIRouter(prefix="/video-task", tags=["Video Task"])
@@ -78,6 +81,23 @@ def normalize_doc(doc: dict | None) -> dict:
             safe[k] = str(v) if v is not None else ""
     return safe
 
+async def hydrate_company_email(company: dict | None) -> dict | None:
+    if not company or company.get("email"):
+        return company
+
+    user_id = company.get("user_id")
+    if not user_id:
+        return company
+
+    try:
+        user_doc = await db.users.find_one({"_id": ObjectId(str(user_id))}, {"email": 1})
+    except Exception:
+        user_doc = await db.users.find_one({"_id": str(user_id)}, {"email": 1})
+
+    if user_doc and user_doc.get("email"):
+        company["email"] = user_doc["email"]
+    return company
+
 
 @router.get(
     "/public/video/{template_id}/{customer_id}",
@@ -98,29 +118,42 @@ async def public_video_download(
         raise HTTPException(404, "Customer not found")
 
     customer = normalize_doc(customer)
-    company = normalize_doc(company)
+    company = {}
+    company_id = template.get("company_id") or customer.get("linked_company_id")
+    if company_id:
+        company_doc = await db.companies.find_one({"_id": ObjectId(str(company_id))})
+        company_doc = await hydrate_company_email(company_doc)
+        company = normalize_doc(company_doc)
 
     # 4️⃣ Prepare output
-    media_dir = os.path.abspath("media")
-    os.makedirs(media_dir, exist_ok=True)
-
     filename = f"{template_id}_{customer_id}_preview.mp4"
-    output_path = os.path.join(media_dir, filename)
+    folder = ensure_media_folder(
+        template.get("folder_path") or template_folder_path(str(company_id), template_id)
+    )
+    output_path = get_media_abs_path(f"{folder}/{filename}")
 
     # 5️⃣ Render only if not exists
     if not os.path.exists(output_path):
-        await run_in_threadpool(
-            render_preview,
-            template,
-            {"customer": customer, "company": company},
-            output_path,
-        )
+        template_snapshot = deepcopy(template)
+        customer_snapshot = deepcopy(customer)
+        company_snapshot = deepcopy(company)
+
+        async def work(job_id: str, job_output_path: str, _folder: str):
+            await asyncio.to_thread(
+                render_preview,
+                deepcopy(template_snapshot),
+                {"customer": deepcopy(customer_snapshot), "company": deepcopy(company_snapshot)},
+                job_output_path,
+            )
+            shutil.copyfile(job_output_path, output_path)
+
+        await run_render_job(kind="public_video_task_download", extension="mp4", work=work)
 
         # 6️⃣ Create video task entry
         await db.video_tasks.insert_one({
             "template_id": ObjectId(template_id),
             "customer_id": ObjectId(customer_id),
-            "video_path": f"/media/{filename}",
+            "video_path": f"/media/{folder}/{filename}",
             "download_count": 0,
             "is_public": True,
             "created_at": datetime.utcnow()

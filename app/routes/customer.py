@@ -12,15 +12,18 @@ from app.db.connection import db
 from app.utils.auth import require_roles, hash_password
 from app.models.customer_model import CustomerCreate, CustomerOut
 from fastapi import Request, UploadFile, File, Form
-from app.services.storage import save_customer_file
+from app.services.storage import delete_media_file, delete_media_folder, save_customer_file
 from app.services.url import build_media_url
 from fastapi import Request
-from app.services.storage import save_upload_file
+from app.services.storage import customer_folder_path
 import random
 from pymongo.errors import DuplicateKeyError
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/customer", tags=["Customer Management"])
-print("Customer router loaded")
+
+class DeleteCustomersRequest(BaseModel):
+    customer_ids: List[str]
 
 async def generate_distributed_id() -> str:
     """
@@ -52,6 +55,31 @@ def validate_image_file(file: UploadFile):
             status_code=400,
             detail=f"{file.filename} has invalid content type"
         )
+
+
+def delete_customer_media(customer: dict):
+    company_id = str(customer["linked_company_id"])
+    customer_id = str(customer["_id"])
+    delete_media_folder(customer_folder_path(company_id, customer_id))
+
+    distributed_id = customer.get("distributed_id")
+    if distributed_id:
+        delete_media_folder(customer_folder_path(company_id, str(distributed_id)))
+
+    delete_media_folder(f"customer_{customer_id}")
+
+    logo_url = customer.get("logo_url")
+    if logo_url:
+        logo_path = str(logo_url).replace("\\", "/").replace("./media/", "").replace("media/", "").lstrip("/")
+        if not logo_path:
+            return
+        if logo_path.startswith(("http://", "https://")):
+            return
+        logo_folder = os.path.dirname(logo_path).replace("\\", "/")
+        if "/customers/" in logo_folder or logo_folder.startswith("customer_"):
+            delete_media_folder(logo_folder)
+        else:
+            delete_media_file(logo_path)
 
 # --------------------------------------------------------
 # 🟢 BULK UPLOAD: Excel + Logo Files
@@ -151,7 +179,6 @@ async def bulk_upload_customers(
         results = []
         row_num = 2
         logo_path_cache = {}
-
         for row_data in rows_data:
 
             if not any(row_data.get(f) for f in ["password", "full_name", "distributed_id"]):
@@ -164,6 +191,7 @@ async def bulk_upload_customers(
                     or str(row_data.get("logo_file_name", "")).strip()
                 )
 
+                logo_file = None
                 logo_url = None
 
                 if logo_filename:
@@ -207,7 +235,7 @@ async def bulk_upload_customers(
 
                         # Save if uploaded and we have a company to save under
                         elif company_id:
-                            path, _ = await save_upload_file(logo_file, company_id)
+                            path = None
                             logo_url = path   # ✅ store raw path only
                             logo_path_cache[logo_filename_key] = path
 
@@ -232,6 +260,14 @@ async def bulk_upload_customers(
                     customer_data["logo_url"] = logo_url
 
                 result = await create_single_customer(customer_data, user)
+                if logo_file and company_id:
+                    await logo_file.seek(0)
+                    path, _ = await save_customer_file(logo_file, company_id, result["customer_id"])
+                    await db.customers.update_one(
+                        {"_id": ObjectId(result["customer_id"])},
+                        {"$set": {"logo_url": path, "updated_at": datetime.utcnow()}}
+                    )
+                    result["logo_url"] = path
 
                 results.append({
                     "success": True,
@@ -463,14 +499,20 @@ async def create_customer_handler(
         # Remove file object from dict
         data.pop("logo_file", None)
 
-        # Save logo if provided
         if logo_file:
             validate_image_file(logo_file)
-            
-            path, _ = await save_customer_file(logo_file, company_id, data.get("distributed_id") or "customer")
-            data["logo_url"] = path
+
+        result = await create_single_customer(data, user)
+        if logo_file:
+            await logo_file.seek(0)
+            path, _ = await save_customer_file(logo_file, company_id, result["customer_id"])
+            await db.customers.update_one(
+                {"_id": ObjectId(result["customer_id"])},
+                {"$set": {"logo_url": path, "updated_at": datetime.utcnow()}}
+            )
+            result["logo_url"] = path
             print("Logo saved at:", path)
-        return await create_single_customer(data, user)
+        return result
 
     else:
         raise HTTPException(status_code=415, detail="Unsupported Content-Type")
@@ -656,8 +698,11 @@ async def update_customer(
     if logo_url is not None:
         validate_image_file(logo_url)
 
-        from app.services.storage import save_upload_file
-        path, _ = await save_upload_file(logo_url, f"customer_{customer_id}")
+        path, _ = await save_customer_file(
+            logo_url,
+            str(customer["linked_company_id"]),
+            customer_id
+        )
         update_data["logo_url"] = path
     if customer_category is not None:  # NEW FIELD
         update_data["customer_category"] = customer_category    
@@ -679,6 +724,44 @@ async def update_customer(
     }
 
 # --------------------------------------------------------
+# 🔴 DELETE MULTIPLE CUSTOMERS + LINKED USERS
+# --------------------------------------------------------
+@router.delete("/delete-multiple")   # ✅ Must come FIRST
+async def delete_customers(
+    payload: DeleteCustomersRequest,
+    user=Depends(require_roles("superadmin", "company"))
+):
+
+    object_ids = [to_oid(cid) for cid in payload.customer_ids]
+
+    customers = await db.customers.find(
+        {"_id": {"$in": object_ids}}
+    ).to_list(length=None)
+
+    if not customers:
+        raise HTTPException(status_code=404, detail="Customers not found")
+
+    user_ids = [customer["user_id"] for customer in customers]
+
+    # Delete customers
+    await db.customers.delete_many({
+        "_id": {"$in": object_ids}
+    })
+
+    # Delete linked users
+    await db.users.delete_many({
+        "_id": {"$in": user_ids}
+    })
+
+    for customer in customers:
+        delete_customer_media(customer)
+
+    return {
+        "message": "Customers and linked users deleted successfully"
+    }
+
+
+# --------------------------------------------------------
 # 🔴 DELETE CUSTOMER + LINKED USER
 # --------------------------------------------------------
 @router.delete("/{customer_id}")
@@ -690,5 +773,7 @@ async def delete_customer(customer_id: str, user=Depends(require_roles("superadm
 
     await db.customers.delete_one({"_id": to_oid(customer_id)})
     await db.users.delete_one({"_id": customer["user_id"]})
+    delete_customer_media(customer)
 
     return {"message": "Customer and linked user deleted successfully"}
+    

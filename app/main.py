@@ -1,11 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import auth, company, customer, admin, media, template, video_task, task, category, public, public_templates, voise_over
+from app.routes import auth, company, customer, admin, media, template, video_task, task, category, public, public_templates, voise_over, render_jobs
 from app.db.connection import db
 from app.utils.auth import hash_password
-import asyncio
 from fastapi.staticfiles import StaticFiles
 import os
+from app.services.render_queue import start_render_worker
 
 
 # ✅ Create app instance only once
@@ -24,8 +24,10 @@ app.mount("/media", StaticFiles(directory=media_dir), name="media")
 
 # ✅ CORS setup
 origins = [
+    "http://localhost",
     "http://localhost:3000",
-    "https://videoedittool-puce.vercel.app",
+    "https://super-lolly-559e09.netlify.app",
+    "https://api.triaangle.co.in",
 ]
 
 app.add_middleware(
@@ -49,6 +51,7 @@ app.include_router(category.router)
 app.include_router(public.router)
 app.include_router(public_templates.router)
 app.include_router(voise_over.router)
+app.include_router(render_jobs.router)
 
 # ✅ Simple health check route
 @app.get("/")
@@ -75,4 +78,5 @@ async def create_super_admin():
 @app.on_event("startup")
 async def startup_event():
     await create_super_admin()
+    start_render_worker()
     print("🚀 Application startup complete.")
