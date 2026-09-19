@@ -46,6 +46,7 @@ FONT_PATH = FONT_PATH.replace("\\", "/")
 PX_RE = re.compile(r"-?\d+(\.\d+)?")
 FONT_CACHE_DIR = os.path.join(MEDIA_ROOT, "font_cache")
 logger = logging.getLogger(__name__)
+_DRAWTEXT_TEXT_ALIGN_SUPPORTED: Optional[bool] = None
 
 def abs_media_path(path: str) -> str:
     path = path.replace("\\", "/")
@@ -188,6 +189,31 @@ def _run_with_resolved_exec(cmd, exec_name: str = "ffmpeg", env_var: str | None 
     if job_id:
         logger.info("[render] job_id=%s running %s", job_id, exec_name)
     return subprocess.run(cmd, **kwargs)
+
+def ffmpeg_drawtext_supports_text_align() -> bool:
+    """Return whether this FFmpeg build supports drawtext's text_align option."""
+    global _DRAWTEXT_TEXT_ALIGN_SUPPORTED
+    if _DRAWTEXT_TEXT_ALIGN_SUPPORTED is not None:
+        return _DRAWTEXT_TEXT_ALIGN_SUPPORTED
+
+    path = _resolve_exec("ffmpeg", "FFMPEG_BIN")
+    if not path:
+        _DRAWTEXT_TEXT_ALIGN_SUPPORTED = False
+        return False
+
+    try:
+        result = subprocess.run(
+            [path, "-hide_banner", "-h", "filter=drawtext"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        help_text = f"{result.stdout}\n{result.stderr}"
+        _DRAWTEXT_TEXT_ALIGN_SUPPORTED = "text_align" in help_text
+    except Exception:
+        _DRAWTEXT_TEXT_ALIGN_SUPPORTED = False
+
+    return _DRAWTEXT_TEXT_ALIGN_SUPPORTED
 
 def parse_color(value, default=(255, 255, 255, 1.0)):
     if value is None:
@@ -568,12 +594,13 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
         "fix_bounds=1"
     ]
 
-    if align == "center":
-        base_params.append("text_align=center")
-    elif align == "right":
-        base_params.append("text_align=right")
-    else:
-        base_params.append("text_align=left")
+    if ffmpeg_drawtext_supports_text_align():
+        if align == "center":
+            base_params.append("text_align=center")
+        elif align == "right":
+            base_params.append("text_align=right")
+        else:
+            base_params.append("text_align=left")
 
     if letter_spacing:
         base_params.append(f"letter_spacing={int(letter_spacing)}")
