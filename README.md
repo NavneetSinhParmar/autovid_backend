@@ -35,7 +35,7 @@ REDIS_URL=redis://localhost:6379/0
 MONGO_URL=<mongodb-uri>
 DATABASE_NAME=<database-name>
 BASE_URL=https://<api-host>
-FFMPEG_WORKER_CONCURRENCY=1
+FFMPEG_WORKER_CONCURRENCY=2
 FFMPEG_THREADS=1
 ```
 

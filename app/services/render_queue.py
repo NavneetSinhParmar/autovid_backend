@@ -38,7 +38,7 @@ class RenderJob:
 
 _queue: asyncio.Queue[RenderJob] = asyncio.Queue()
 _jobs: dict[str, dict] = {}
-_worker_task: asyncio.Task | None = None
+_worker_tasks: list[asyncio.Task] = []
 _sequence = 0
 
 
@@ -151,6 +151,17 @@ def _configured_worker_count() -> int:
         return 1
 
 
+def _render_concurrency() -> int:
+    try:
+        return max(1, int(os.getenv("FFMPEG_WORKER_CONCURRENCY", "2")))
+    except ValueError:
+        logger.warning(
+            "Invalid FFMPEG_WORKER_CONCURRENCY=%r; using 2",
+            os.getenv("FFMPEG_WORKER_CONCURRENCY"),
+        )
+        return 2
+
+
 def enforce_single_worker_for_memory_queue() -> None:
     if RENDER_QUEUE_BACKEND == "memory" and _configured_worker_count() != 1:
         raise RuntimeError(
@@ -160,12 +171,17 @@ def enforce_single_worker_for_memory_queue() -> None:
 
 
 def start_render_worker() -> None:
-    global _worker_task
+    global _worker_tasks
     enforce_single_worker_for_memory_queue()
-    if _worker_task and not _worker_task.done():
+    _worker_tasks = [task for task in _worker_tasks if not task.done()]
+    if _worker_tasks:
         return
-    _worker_task = asyncio.get_running_loop().create_task(_render_worker())
-    logger.info("[render_queue] FIFO render worker started concurrency=1")
+    concurrency = _render_concurrency()
+    _worker_tasks = [
+        asyncio.get_running_loop().create_task(_render_worker(worker_number))
+        for worker_number in range(1, concurrency + 1)
+    ]
+    logger.info("[render_queue] FIFO render workers started concurrency=%s", concurrency)
 
 
 def _ensure_worker_started() -> None:
@@ -261,7 +277,7 @@ async def run_render_job(
     return job
 
 
-async def _render_worker() -> None:
+async def _render_worker(worker_number: int) -> None:
     while True:
         job = await _queue.get()
         folder = f"{RENDER_JOB_ROOT}/{job.job_id}"
@@ -279,7 +295,12 @@ async def _render_worker() -> None:
                 "started_at": _now(),
                 "updated_at": _now(),
             })
-            logger.info("[render_queue] job_id=%s sequence=%s processing", job.job_id, job.sequence)
+            logger.info(
+                "[render_queue] worker=%s job_id=%s sequence=%s processing",
+                worker_number,
+                job.job_id,
+                job.sequence,
+            )
             await job.work(job.job_id, output_path, folder)
             _jobs[job.job_id].update({
                 "status": "completed",

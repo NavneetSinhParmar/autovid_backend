@@ -13,7 +13,7 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-FFMPEG_WORKER_CONCURRENCY = _env_int("FFMPEG_WORKER_CONCURRENCY", 3)
+FFMPEG_WORKER_CONCURRENCY = _env_int("FFMPEG_WORKER_CONCURRENCY", 2)
 
 celery_app = Celery(
     "autovid_render_worker",
