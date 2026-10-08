@@ -1,0 +1,4 @@
+customer_company_name,full_name,username,email,password,city,phone_number,telephone_number,address,status,logo_url,customer_category
+Example Retail Pvt Ltd,Customer One,customer1,customer1@example.com,Abc@1234,Hyderabad,9000000001,8000000001,"1 Example Street, Hyderabad, India",active,customer_logo1,Retail
+Example Corporate Ltd,Customer Two,customer2,customer2@example.com,Abc@1234,Kolkata,9000000002,8000000002,"2 Example Street, Kolkata, India",active,customer_logo2,Corporate
+Example Services Ltd,Customer Three,customer3,customer3@example.com,Abc@1234,Delhi,9000000003,8000000003,"3 Example Street, Delhi, India",active,,Services

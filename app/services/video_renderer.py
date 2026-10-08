@@ -10,10 +10,9 @@ import requests
 import hashlib 
 import shlex
 import logging
+from copy import deepcopy
 from bson import ObjectId 
 from app.db.connection import db 
-from dotenv import load_dotenv
-load_dotenv()
 from app.services.render_helper import (
     find_background,
 )
@@ -27,6 +26,7 @@ DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 MEDIA_ROOT = os.getenv("MEDIA_ROOT", "media")
 FFMPEG = "ffmpeg"
 FFPROBE = "ffprobe"
+FFMPEG_TIMEOUT_SECONDS = None
 
 
 def _env_int(name: str, default: int) -> int:
@@ -46,7 +46,6 @@ FONT_PATH = FONT_PATH.replace("\\", "/")
 PX_RE = re.compile(r"-?\d+(\.\d+)?")
 FONT_CACHE_DIR = os.path.join(MEDIA_ROOT, "font_cache")
 logger = logging.getLogger(__name__)
-_DRAWTEXT_TEXT_ALIGN_SUPPORTED: Optional[bool] = None
 
 def abs_media_path(path: str) -> str:
     path = path.replace("\\", "/")
@@ -82,14 +81,14 @@ def is_valid_src(src: str, label: str = "") -> bool:
       - Local paths that don't exist on disk
     """
     if not src or not isinstance(src, str):
-        print(f"   ⏭ Skipping {label}: src is empty or None")
+        logger.debug("Skipping %s because source is empty", label)
         return False
 
     src = src.strip()
 
     # Unresolved placeholder — placeholder replacement found no value
     if src.startswith("{{") or src.endswith("}}"):
-        print(f"   ⏭ Skipping {label}: unresolved placeholder → {src}")
+        logger.debug("Skipping %s because source has an unresolved placeholder", label)
         return False
 
     # Remote URL — trust FFmpeg to handle it
@@ -98,7 +97,7 @@ def is_valid_src(src: str, label: str = "") -> bool:
 
     # Local file — must actually exist
     if not os.path.exists(src):
-        print(f"   ⏭ Skipping {label}: local file not found → {src}")
+        logger.debug("Skipping %s because local source does not exist", label)
         return False
 
     return True
@@ -177,43 +176,21 @@ def _run_with_resolved_exec(cmd, exec_name: str = "ffmpeg", env_var: str | None 
     if exec_name == "ffmpeg":
         cmd[1:1] = [
             "-hide_banner",
+            "-loglevel", "error",
             "-nostdin",
             "-threads", str(FFMPEG_THREADS),
             "-filter_threads", str(FFMPEG_THREADS),
+            "-filter_complex_threads", str(FFMPEG_THREADS),
         ]
         env = dict(os.environ)
         env.setdefault("OMP_NUM_THREADS", str(FFMPEG_THREADS))
         env.setdefault("MKL_NUM_THREADS", str(FFMPEG_THREADS))
         kwargs.setdefault("env", env)
+        kwargs.setdefault("timeout", FFMPEG_TIMEOUT_SECONDS)
     job_id = current_render_job_id.get()
     if job_id:
         logger.info("[render] job_id=%s running %s", job_id, exec_name)
     return subprocess.run(cmd, **kwargs)
-
-def ffmpeg_drawtext_supports_text_align() -> bool:
-    """Return whether this FFmpeg build supports drawtext's text_align option."""
-    global _DRAWTEXT_TEXT_ALIGN_SUPPORTED
-    if _DRAWTEXT_TEXT_ALIGN_SUPPORTED is not None:
-        return _DRAWTEXT_TEXT_ALIGN_SUPPORTED
-
-    path = _resolve_exec("ffmpeg", "FFMPEG_BIN")
-    if not path:
-        _DRAWTEXT_TEXT_ALIGN_SUPPORTED = False
-        return False
-
-    try:
-        result = subprocess.run(
-            [path, "-hide_banner", "-h", "filter=drawtext"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        help_text = f"{result.stdout}\n{result.stderr}"
-        _DRAWTEXT_TEXT_ALIGN_SUPPORTED = "text_align" in help_text
-    except Exception:
-        _DRAWTEXT_TEXT_ALIGN_SUPPORTED = False
-
-    return _DRAWTEXT_TEXT_ALIGN_SUPPORTED
 
 def parse_color(value, default=(255, 255, 255, 1.0)):
     if value is None:
@@ -459,7 +436,7 @@ def smart_logo_mapping(src: str, size: str = None) -> str:
     
     return src
 
-def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, context, canvas_w=None, canvas_h=None):
+def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, context, canvas_w=None, canvas_h=None, render_scale=1.0):
     details = item.get("details", {}) or {}
     display = item.get("display", {})
     start = display.get("from", 0) / 1000
@@ -564,6 +541,14 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
     align = str(details.get("textAlign", "left")).lower()
 
     box_w = max_width if max_width > 0 else (float(canvas_w or 1920) - left)
+    # Wrap and clamp in editor coordinates; rasterize at the final pixel size.
+    left *= render_scale
+    top *= render_scale
+    box_w *= render_scale
+    font_size = max(1, round(font_size * render_scale))
+    letter_spacing *= render_scale
+    if line_spacing is not None:
+        line_spacing = round(line_spacing * render_scale)
 
     if align == "center":
         x_expr = f"{left}+({box_w}-text_w)/2"
@@ -594,13 +579,12 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
         "fix_bounds=1"
     ]
 
-    if ffmpeg_drawtext_supports_text_align():
-        if align == "center":
-            base_params.append("text_align=center")
-        elif align == "right":
-            base_params.append("text_align=right")
-        else:
-            base_params.append("text_align=left")
+    if align == "center":
+        base_params.append("text_align=center")
+    elif align == "right":
+        base_params.append("text_align=right")
+    else:
+        base_params.append("text_align=left")
 
     if letter_spacing:
         base_params.append(f"letter_spacing={int(letter_spacing)}")
@@ -616,21 +600,21 @@ def add_text_item_filters(filter_parts, last_label, item, duration, text_idx, co
     border_width = details.get("borderWidth", 0)
     border_color = details.get("borderColor", "transparent")
     if border_width and border_color and border_color != "transparent":
-        base_params.append(f"borderw={int(border_width)}")
+        base_params.append(f"borderw={round(float(border_width) * render_scale)}")
         base_params.append(f"bordercolor={ffmpeg_color(parse_color(border_color), opacity)}")
 
     shadows = []
     text_shadow = parse_shadow_string(details.get("textShadow", "none"))
     if text_shadow:
-        text_shadow["x"] = text_shadow.get("x", 0) * scale_val
-        text_shadow["y"] = text_shadow.get("y", 0) * scale_val
+        text_shadow["x"] = text_shadow.get("x", 0) * scale_val * render_scale
+        text_shadow["y"] = text_shadow.get("y", 0) * scale_val * render_scale
         shadows.append(text_shadow)
 
     box_shadow = details.get("boxShadow")
     if isinstance(box_shadow, dict):
         shadow_color = box_shadow.get("color", "#000000")
-        shadow_x = box_shadow.get("x", 0) * scale_val
-        shadow_y = box_shadow.get("y", 0) * scale_val
+        shadow_x = box_shadow.get("x", 0) * scale_val * render_scale
+        shadow_y = box_shadow.get("y", 0) * scale_val * render_scale
         if shadow_x or shadow_y:
             shadows.append({
                 "x": shadow_x,
@@ -979,7 +963,7 @@ def render_image_preview(template_json, customer, company, output_path):
                 f"crop={canvas_w}:{canvas_h}{bg_style}[base]"
             )
         else:
-            print(f"   ⚠️ Background src invalid/missing — using black canvas fallback")
+            logger.debug("Background source unavailable; using black canvas")
             filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}[base]")
     else:
         filter_parts.append(f"color=c=black:s={canvas_w}x{canvas_h}[base]")
@@ -1073,16 +1057,15 @@ def render_image_preview(template_json, customer, company, output_path):
         "-filter_complex", ";".join(filter_parts),
         "-map", current,
         "-frames:v", "1",
+        "-update", "1",
         "-q:v", "2",
         "-vcodec", "mjpeg",
+        "-threads", str(FFMPEG_THREADS),
         "-f", "image2",
         output_path,
     ]
 
-    try:
-        print("Render image FFmpeg command:", " ".join(shlex.quote(c) for c in cmd))
-    except Exception:
-        print("Render image FFmpeg command:", cmd)
+    logger.debug("Running FFmpeg image render")
 
     _run_with_resolved_exec(cmd, exec_name="ffmpeg", env_var="FFMPEG_BIN", check=True)
     return " ".join(shlex.quote(c) for c in cmd)
@@ -1122,8 +1105,13 @@ def render_preview(template_json, context_data=None, output_path=None):
     tracks = design.get("tracks", [])
     duration = float(duration)
 
-    canvas_w, canvas_h = resolve_canvas_size(design)
-    fps = resolve_fps(design)
+    editor_w, editor_h = resolve_canvas_size(design)
+    render_scale = min(1.0, 1280 / editor_w, 720 / editor_h)
+    if os.getenv("FFMPEG_COMPOSE_AT_OUTPUT_SIZE", "true").lower() != "true":
+        render_scale = 1.0
+    canvas_w = max(2, int(editor_w * render_scale / 2) * 2)
+    canvas_h = max(2, int(editor_h * render_scale / 2) * 2)
+    fps = min(resolve_fps(design), 30)
 
     filter_parts = []
     visual_inputs = []
@@ -1205,7 +1193,10 @@ def render_preview(template_json, context_data=None, output_path=None):
     # -------------------------------------------------
     for idx, data in enumerate(visual_inputs):
         item = data["item"]
-        details = item.get("details", {})
+        details = deepcopy(item.get("details", {}))
+        for key in ("width", "height", "left", "top", "right", "bottom", "blur"):
+            if key in details:
+                details[key] = safe_float(details[key]) * render_scale
         display = item.get("display", {})
 
         start = display.get("from", 0) / 1000
@@ -1228,9 +1219,9 @@ def render_preview(template_json, context_data=None, output_path=None):
         orig_h = safe_float(details.get("height", 0))
 
         if orig_w <= 0:
-            orig_w = 200.0
+            orig_w = 200.0 * render_scale
         if orig_h <= 0:
-            orig_h = 200.0
+            orig_h = 200.0 * render_scale
 
         scale = parse_scale(details.get("transform", "scale(1)"))
 
@@ -1276,8 +1267,9 @@ def render_preview(template_json, context_data=None, output_path=None):
                     duration,
                     txt_idx,
                     context,
-                    canvas_w=canvas_w,
-                    canvas_h=canvas_h,
+                    canvas_w=editor_w,
+                    canvas_h=editor_h,
+                    render_scale=render_scale,
                 )
                 text_ids_done.add(str(item_id))
 
@@ -1297,8 +1289,9 @@ def render_preview(template_json, context_data=None, output_path=None):
             duration,
             txt_idx,
             context,
-            canvas_w=canvas_w,
-            canvas_h=canvas_h,
+            canvas_w=editor_w,
+            canvas_h=editor_h,
+            render_scale=render_scale,
         )
         text_ids_done.add(sid)
     # -------------------------------------------------
@@ -1375,31 +1368,41 @@ def render_preview(template_json, context_data=None, output_path=None):
             audio_labels.append(f"[aud{i}]")
 
     if audio_labels:
-        filter_parts.append(
-            f"{''.join(audio_labels)}amix=inputs={len(audio_labels)}:normalize=0[outa]"
-        )
+        if len(audio_labels) == 1:
+            filter_parts.append(f"{audio_labels[0]}anull[outa]")
+        else:
+            filter_parts.append(
+                f"{''.join(audio_labels)}amix=inputs={len(audio_labels)}:normalize=0[outa]"
+            )
 
     # -------------------------------------------------
     # 6️⃣ BUILD FFMPEG COMMAND
     # -------------------------------------------------
-    print(f"   Visual inputs after validation: {len(visual_inputs)}")
-    for i, v in enumerate(visual_inputs):
-        print(f"     [{i}] {v['media_type'].upper()}: {v['src']}")
-    print(f"   Audio inputs after validation: {len(audio_inputs)}")
-    for i, a in enumerate(audio_inputs):
-        print(f"     [{i}] AUDIO: {a['src']}")
-    print("=" * 80 + "\n")
+    logger.debug(
+        "Prepared FFmpeg inputs: visual=%s audio=%s",
+        len(visual_inputs), len(audio_inputs),
+    )
     
     cmd = ["ffmpeg", "-y"]
 
     for v in visual_inputs:
         if v["media_type"] == "image":
-            cmd += ["-loop", "1", "-t", str(duration), "-i", v["src"]]
+            # Decode/scale a still once. Overlay repeats its last frame for the timeline.
+            cmd += ["-i", v["src"]]
         else:
             cmd += ["-i", v["src"]]
 
     for a in audio_inputs:
         cmd += ["-i", a["src"]]
+
+    if canvas_w <= 1280 and canvas_h <= 720:
+        filter_parts.append(f"{last_label}setsar=1[mobileout]")
+    else:
+        filter_parts.append(
+            f"{last_label}scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease,"
+            "scale='trunc(iw/2)*2':'trunc(ih/2)*2',setsar=1[mobileout]"
+        )
+    last_label = "[mobileout]"
 
     cmd += [
         "-filter_complex", ";".join(filter_parts),
@@ -1413,16 +1416,17 @@ def render_preview(template_json, context_data=None, output_path=None):
 
     cmd += [
         "-c:v", "libx264",
+        "-threads", str(FFMPEG_THREADS),
         "-pix_fmt", "yuv420p",
+        "-preset", os.getenv("FFMPEG_PRESET", "veryfast"),
+        "-crf", os.getenv("FFMPEG_CRF", "22"),
+        "-movflags", "+faststart",
         "-r", str(fps),
         "-t", str(duration),
         output_path
     ]
 
-    try:
-        print("Render video FFmpeg command:", " ".join(shlex.quote(c) for c in cmd))
-    except Exception:
-        print("Render video FFmpeg command:", cmd)
+    logger.debug("Running FFmpeg video render with %s visual and %s audio inputs", len(visual_inputs), len(audio_inputs))
 
     _run_with_resolved_exec(cmd, exec_name="ffmpeg", env_var="FFMPEG_BIN", check=True)
     return " ".join(shlex.quote(c) for c in cmd)
@@ -1461,7 +1465,7 @@ def render_video(task_id: str):
         output_path
     ]
 
-    print("SIMPLE CMD:", " ".join(cmd))
+    logger.debug("Running legacy FFmpeg render")
     _run_with_resolved_exec(cmd, exec_name="ffmpeg", env_var="FFMPEG_BIN", check=True)
 
     return output_path

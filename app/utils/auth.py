@@ -7,24 +7,26 @@ from fastapi.security import OAuth2PasswordBearer
 from app.db.connection import db
 from bson import ObjectId
 import os
-from dotenv import load_dotenv, find_dotenv
 from fastapi import HTTPException
 from app.utils.constants import ALLOWED_ROLES
 
-load_dotenv(find_dotenv())
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM") or "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES") or 60)
 
-if not SECRET_KEY:
+if not SECRET_KEY or len(SECRET_KEY.encode("utf-8")) < 32 or SECRET_KEY == "replace_this_with_a_strong_secret":
     raise RuntimeError(
-        "SECRET_KEY environment variable is required for JWT generation. "
-        "Set SECRET_KEY in your environment or .env file."
+        "SECRET_KEY must be a unique secret of at least 32 bytes; "
+        f"the effective value has {len((SECRET_KEY or '').encode('utf-8'))} bytes. "
+        "Set a randomly generated key in the project .env.local and restart Uvicorn. "
+        "An existing process SECRET_KEY overrides .env.local; remove a stale shell "
+        "value if needed. Production must use a deployment secret manager."
     )
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+optional_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 def validate_role(role: str):
     """Ensure only allowed roles are used."""
@@ -97,3 +99,9 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     if user is None:
         raise credentials_exception
     return user
+
+
+async def get_optional_current_user(token: str | None = Depends(optional_oauth2_scheme)):
+    if not token:
+        return None
+    return await get_current_user(token)

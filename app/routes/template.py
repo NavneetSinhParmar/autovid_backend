@@ -20,10 +20,18 @@ from app.services.storage import (
     get_media_abs_path,
     template_folder_path,
 )
-from app.services.render_queue import run_render_job
+from app.services.render_queue import enqueue_celery_render_job
+from app.core.tenancy import company_id_for_user, owned_customer, owned_template
+from app.core.rate_limit import rate_limit
+from app.core.settings import settings
+from app.core.pagination import PaginationParams, page_result
+from app.models.template_model import TemplateCreate, TemplateUpdate
+from app.core.serialization import serialize_document
 import uuid
 import os
+import logging
 router = APIRouter(prefix="/templates", tags=["Templates"])
+logger = logging.getLogger(__name__)
 
 
 def _template_folder(template: dict, template_id: str) -> str:
@@ -42,7 +50,7 @@ def _template_output_path(template: dict, template_id: str, filename: str) -> st
 # ================= CREATE TEMPLATE =================
 @router.post("/")
 async def create_template(
-    data: dict,
+    data: TemplateCreate,
     user=Depends(require_roles("company"))
 ):
 
@@ -53,7 +61,8 @@ async def create_template(
     if not company:
         raise HTTPException(400, "Company not found")
 
-    template_json = data.get("template_json", {})
+    values = data.model_dump()
+    template_json = values.get("template_json", {})
     design = template_json.get("design", {}) if isinstance(template_json, dict) else {}
     options = template_json.get("options", {}) if isinstance(template_json, dict) else {}
     if isinstance(design, dict):
@@ -66,17 +75,17 @@ async def create_template(
 
     template_doc = {
         "company_id": str(company["_id"]),
-        "template_name": data["template_name"],
-        "category": data.get("category", "general"),
-        "preview_image_url": data.get("preview_image_url"),
-        "base_video_url": data.get("base_video_url"),
-        "base_image_url": data.get("base_image_url"),
-        "base_audio_url": data.get("base_audio_url"),
-        "duration": data.get("duration"),
-        "trim": data.get("trim"),
+        "template_name": values["template_name"],
+        "category": values.get("category", "general"),
+        "preview_image_url": values.get("preview_image_url"),
+        "base_video_url": values.get("base_video_url"),
+        "base_image_url": values.get("base_image_url"),
+        "base_audio_url": values.get("base_audio_url"),
+        "duration": values.get("duration"),
+        "trim": values.get("trim"),
         "template_json": template_json,
-        "type": data.get("type", "video"),
-        "public": data.get("public", True),
+        "type": values.get("type", "video"),
+        "public": values.get("public", False),
         "status": "active",
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
@@ -98,67 +107,45 @@ async def create_template(
 
 # ================= LIST TEMPLATES =================
 @router.get("/")
-async def list_templates(user=Depends(require_roles("company"))):
+async def list_templates(
+    pagination: PaginationParams = Depends(),
+    category: str | None = None,
+    template_type: str | None = None,
+    status: str = "active",
+    user=Depends(require_roles("company")),
+):
 
     company = await db.companies.find_one({
         "user_id": str(user["_id"])
     })
 
-    templates = await db.templates.find({
+    query = {
         "company_id": str(company["_id"]),
-        "status": "active"
-    }).to_list(length=1000)
+        "status": status,
+    }
+    if category:
+        query["category"] = category
+    if template_type:
+        query["type"] = template_type
+    if pagination.search:
+        query["template_name"] = {"$regex": re.escape(pagination.search), "$options": "i"}
+    total = await db.templates.count_documents(query)
+    sort_field, sort_direction = pagination.sort({"created_at", "updated_at", "template_name", "category"})
+    templates = await db.templates.find(query).sort(sort_field, sort_direction).skip(pagination.skip).limit(pagination.limit).to_list(pagination.limit)
 
     for t in templates:
         t["id"] = str(t["_id"])
         del t["_id"]
 
-    return {"templates": templates}
-
-
-@router.get("/")
-async def get_template(
-    template_name: str = Query(None),
-    category: str = Query(None),
-    type: str = Query(None),
-    current_user: dict = Depends(get_current_user)
-):
-
-    query = {
-        "status": "active",
-        "company_id": current_user["company_id"]
-    }
-
-    if template_name:
-        query["template_name"] = template_name
-
-    if category:
-        query["category"] = category
-
-    if type:
-        query["type"] = type
-
-    template = await db.templates.find_one(query)
-
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
-
-    template["id"] = str(template["_id"])
-    del template["_id"]
-
-    return {"template": template}
+    result = page_result(templates, total, pagination)
+    result["templates"] = result.pop("items")
+    return result
 
 # ================= GET TEMPLATE =================
 @router.get("/{template_id}")
-async def get_template(template_id: str):
-
-    template = await db.templates.find_one({
-        "_id": ObjectId(template_id),
-        "status": "active"
-    })
-
-    if not template:
-        raise HTTPException(404, "Template not found")
+async def get_template(template_id: str, user=Depends(require_roles("company"))):
+    company_id = await company_id_for_user(user)
+    template = await owned_template(template_id, company_id)
 
     template["id"] = str(template["_id"])
     del template["_id"]
@@ -169,23 +156,26 @@ async def get_template(template_id: str):
 @router.patch("/{template_id}")
 async def update_template(
     template_id: str,
-    data: dict,
+    data: TemplateUpdate,
     user=Depends(require_roles("company"))
 ):
+    company_id = await company_id_for_user(user)
+    await owned_template(template_id, company_id)
+    update_values = data.model_dump(exclude_none=True)
+    if not update_values:
+        raise HTTPException(400, "No fields provided for update")
     await db.templates.update_one(
         {"_id": ObjectId(template_id)},
-        {"$set": {**data, "updated_at": datetime.utcnow()}}
+        {"$set": {**update_values, "updated_at": datetime.utcnow()}}
     )
 
     return {"message": "Template updated successfully"}
 
 # ================= DELETE TEMPLATE =================
 @router.delete("/{template_id}")
-async def delete_template(template_id: str):
-
-    template = await db.templates.find_one({"_id": ObjectId(template_id)})
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
+async def delete_template(template_id: str, user=Depends(require_roles("company"))):
+    company_id = await company_id_for_user(user)
+    template = await owned_template(template_id, company_id)
 
     await db.templates.delete_one({"_id": ObjectId(template_id)})
     await db.media.delete_many({"template_id": template_id})
@@ -200,72 +190,28 @@ async def delete_template(template_id: str):
     return {"message": "Template deleted"}
 
 # ================= PREVIEW TEMPLATE =================
-@router.post("/{template_id}/preview")
-async def preview_template(template_id: str):
-    template = await db.templates.find_one({"_id": ObjectId(template_id)})
-    if not template:
-        raise HTTPException(status_code=404, detail="Template Does not exist!")
+@router.post("/{template_id}/preview", status_code=202)
+async def preview_template(
+    template_id: str,
+    user=Depends(rate_limit("render-preview", settings.render_rate_limit)),
+):
+    if user.get("role") != "company":
+        raise HTTPException(403, "Company access required")
+    company_id = await company_id_for_user(user)
+    template = await owned_template(template_id, company_id)
 
-    company_id = template.get("company_id")
-    company_data = None
-    if company_id:
-        company_data = await db.companies.find_one({"_id": ObjectId(company_id)})
-        company_data = await hydrate_company_email(company_data)
-
-    template_type = str(template.get("type", "video")).lower()
-
-    try:
-        company_context = {}
-        if company_data:
-            company_context = {
-                "company_name": company_data.get("company_name") or company_data.get("name") or "",
-                "logo_url": company_data.get("logo_url") or company_data.get("logoUrl") or company_data.get("logo") or "",
-                "description": company_data.get("description") or "",
-                "mobile": company_data.get("mobile") or "",
-                "email": company_data.get("email") or "",
-            }
-
-        # IMAGE template -> JPEG
-        if template_type in ("img", "image"):
-            preview_filename = f"{template_id}_preview.jpg"
-            preview_path = _template_output_path(template, template_id, preview_filename)
-            tpl_json = deepcopy(template["template_json"])
-            company_snapshot = deepcopy(company_context)
-
-            async def work(job_id: str, output_path: str, _folder: str):
-                await asyncio.to_thread(
-                    render_image_preview,
-                    deepcopy(tpl_json),
-                    {},
-                    deepcopy(company_snapshot),
-                    output_path,
-                )
-                shutil.copyfile(output_path, preview_path)
-
-            await run_render_job(kind="image_preview", extension="jpg", work=work)
-            return FileResponse(path=preview_path, media_type="image/jpeg", filename=preview_filename)
-
-        # VIDEO template -> MP4
-        preview_filename = f"{template_id}_preview.mp4"
-        preview_path = _template_output_path(template, template_id, preview_filename)
-        template_snapshot = deepcopy(template)
-        company_snapshot = deepcopy(company_context)
-
-        async def work(job_id: str, output_path: str, _folder: str):
-            await asyncio.to_thread(
-                render_preview,
-                deepcopy(template_snapshot),
-                {"customer": {}, "company": deepcopy(company_snapshot)},
-                output_path,
-            )
-            shutil.copyfile(output_path, preview_path)
-
-        await run_render_job(kind="video_preview", extension="mp4", work=work)
-        return FileResponse(path=preview_path, media_type="video/mp4", filename=preview_filename)
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+    company_data = await db.companies.find_one({"_id": ObjectId(company_id)})
+    company_data = await hydrate_company_email(company_data)
+    company_context = normalize_company(company_data)
+    is_image = str(template.get("type", "video")).lower() in ("img", "image")
+    job = await enqueue_celery_render_job(
+        kind="image_preview" if is_image else "video_preview",
+        extension="jpg" if is_image else "mp4",
+        company_id=company_id,
+        template_id=template_id,
+        payload={"template": template, "context": {"customer": {}, "company": company_context}},
+    )
+    return {"message": "Preview queued", **job}
 
 PLACEHOLDER_PATTERN = re.compile(r"{{\s*([^}]+)\s*}}")
 def get_nested_value(data: dict, path: str):
@@ -444,15 +390,14 @@ async def _apply_dynamic_audio_to_template(
             or ""
         )
         if not isinstance(raw_text, str) or not raw_text.strip():
-            print(f"[TTS] Skipping track {tid}: empty voisetext")
+            logger.debug("Skipping TTS track with empty text")
             continue
 
         resolved_text = _resolve_placeholders(raw_text, context).strip()
         if not resolved_text:
-            print(f"[TTS] Skipping track {tid}: resolved text is empty")
+            logger.debug("Skipping TTS track after empty placeholder resolution")
             continue
 
-        print(f"[TTS] Track {tid} | raw: {raw_text!r} → resolved: {resolved_text!r}")
 
         # ── Voice / speed ─────────────────────────────────────────────────
         voice = (
@@ -476,8 +421,7 @@ async def _apply_dynamic_audio_to_template(
                 folder_path=folder_path,
             )
         except Exception as exc:
-            print(f"[TTS] ERROR generating audio for track {tid}: {exc}")
-            import traceback; traceback.print_exc()
+            logger.exception("TTS generation failed for template track")
             continue          # leave original audio untouched rather than crashing
 
         # ── Patch the item in-place ───────────────────────────────────────
@@ -496,101 +440,52 @@ async def _apply_dynamic_audio_to_template(
             metadata["originalUrl"]  = new_url
         item["metadata"] = metadata
 
-        print(f"[TTS] Track {tid} patched → {details['src']}")
 
     # write back (mutates template_json in-place, caller already holds ref)
     design["trackItemsMap"] = track_map
     sync_track_item_bounds(design)
     template_json["design"] = design
 
-@router.post("/{template_id}/preview/{customer_id}")
-async def preview_template_customer(template_id: str, customer_id: str):
-
-    template = await db.templates.find_one({"_id": ObjectId(template_id)})
-    if not template:
-        raise HTTPException(status_code=404, detail="Template does not exist")
-
-    customer = await db.customers.find_one({"_id": ObjectId(customer_id)})
-    if not customer:
-        raise HTTPException(status_code=404, detail="Customer does not exist")
+@router.post("/{template_id}/preview/{customer_id}", status_code=202)
+async def preview_template_customer(
+    template_id: str,
+    customer_id: str,
+    user=Depends(rate_limit("render-customer-preview", settings.render_rate_limit)),
+):
+    if user.get("role") != "company":
+        raise HTTPException(403, "Company access required")
+    company_id = await company_id_for_user(user)
+    template = await owned_template(template_id, company_id)
+    customer = await owned_customer(customer_id, company_id)
 
     customer = normalize_customer(customer)
-
-    # ✅ FETCH COMPANY
-    company = None
-    if customer.get("linked_company_id"):
-        company = await db.companies.find_one({
-            "_id": ObjectId(customer["linked_company_id"])
-        })
-        company = await hydrate_company_email(company)
-
-    company = normalize_company(company) if company else {}
-
-    template_type = str(template.get("type", "video")).lower()
-
-    # 🔀 IMAGE (img/image) -> JPEG
-    if template_type in ("img", "image"):
-        preview_filename = f"{template_id}_{customer_id}_preview.jpg"
-        preview_path = _template_output_path(template, template_id, preview_filename)
-        tpl_json = deepcopy(template["template_json"])
-        customer_snapshot = deepcopy(customer)
-        company_snapshot = deepcopy(company)
-
-        async def work(job_id: str, output_path: str, _folder: str):
-            await asyncio.to_thread(
-                render_image_preview,
-                deepcopy(tpl_json),
-                deepcopy(customer_snapshot),
-                deepcopy(company_snapshot),
-                output_path
-            )
-            shutil.copyfile(output_path, preview_path)
-
-        await run_render_job(kind="customer_image_preview", extension="jpg", work=work)
-        return FileResponse(preview_path, media_type="image/jpeg", filename=preview_filename)
-
-    # 🎥 VIDEO
-    preview_filename = f"{template_id}_{customer_id}_preview.mp4"
-    preview_path = _template_output_path(template, template_id, preview_filename)
-
-    # ✅ Dynamic audio TTS (voisetext -> mp3) before rendering
-    tpl_json = deepcopy(template.get("template_json", {}) or {})
-    template_snapshot = deepcopy(template)
-    customer_snapshot = deepcopy(customer)
-    company_snapshot = deepcopy(company)
-    effective_company_id = template.get("company_id") or customer.get("linked_company_id")
-
-    async def work(job_id: str, output_path: str, folder: str):
-        job_template = deepcopy(template_snapshot)
-        job_tpl_json = deepcopy(tpl_json)
-        await _apply_dynamic_audio_to_template(
-            job_tpl_json,
-            customer=deepcopy(customer_snapshot),
-            company=deepcopy(company_snapshot),
-            company_id=str(effective_company_id or ""),
-            folder_path=folder,
-        )
-        job_template["template_json"] = job_tpl_json
-        await asyncio.to_thread(
-            render_preview,
-            job_template,
-            {
-                "customer": deepcopy(customer_snapshot),
-                "company": deepcopy(company_snapshot)
-            },
-            output_path
-        )
-        shutil.copyfile(output_path, preview_path)
-
-    await run_render_job(kind="customer_video_preview", extension="mp4", work=work)
-    return FileResponse(preview_path, media_type="video/mp4")
+    company_doc = await db.companies.find_one({"_id": ObjectId(company_id)})
+    company_doc = await hydrate_company_email(company_doc)
+    company_context = normalize_company(company_doc)
+    is_image = str(template.get("type", "video")).lower() in ("img", "image")
+    job = await enqueue_celery_render_job(
+        kind="customer_image_preview" if is_image else "customer_video_preview",
+        extension="jpg" if is_image else "mp4",
+        company_id=company_id,
+        customer_id=customer_id,
+        template_id=template_id,
+        payload={
+            "template": template,
+            "context": {"customer": customer, "company": company_context},
+            "dynamic_tts": not is_image,
+        },
+    )
+    return {"message": "Preview queued", **job}
 
 @router.get("/{template_id}/download/{customer_id}")
-async def download_video(template_id: str, customer_id: str):
-
-    template = await db.templates.find_one({"_id": ObjectId(template_id)})
-    if not template:
-        raise HTTPException(status_code=404, detail="Template not found")
+async def download_video(
+    template_id: str,
+    customer_id: str,
+    user=Depends(require_roles("company")),
+):
+    company_id = await company_id_for_user(user)
+    template = await owned_template(template_id, company_id)
+    await owned_customer(customer_id, company_id)
 
     template_type = str(template.get("type", "video")).lower()
     is_image = template_type in ("img", "image")

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException, Body, Depends, UploadFile, File
 from fastapi.responses import FileResponse
 from bson import ObjectId
 from datetime import datetime
@@ -13,9 +13,28 @@ from app.utils.placeholders import replace_placeholders
 from app.services.kokoro_tts import synthesize_and_store_media
 from app.services.url import build_media_url
 from app.services.storage import ensure_media_folder, get_media_abs_path, template_folder_path
-from app.services.render_queue import run_render_job
+from app.services.render_queue import enqueue_celery_render_job
+from app.core.rate_limit import rate_limit
+from app.core.settings import settings
 
 router = APIRouter(prefix="/public/templates", tags=["Public Templates"])
+
+
+@router.post("/{template_id}/media")
+async def upload_public_render_media(
+    template_id: str,
+    file: UploadFile = File(...),
+    _=Depends(rate_limit("public-render-upload", settings.upload_rate_limit, authenticated=False)),
+):
+    template = await db.templates.find_one({
+        "_id": _template_oid(template_id), "public": True, "status": "active",
+    })
+    if not template:
+        raise HTTPException(404, "Template not available")
+    folder = f"{template_folder_path(str(template['company_id']), template_id)}/personalization"
+    from app.services.media_upload import validate_and_store_media
+    _, path = await validate_and_store_media(file, folder)
+    return {"media": {"file_url": f"./media/{path}"}}
 
 
 def _template_oid(template_id: str) -> ObjectId:
@@ -79,8 +98,12 @@ async def hydrate_company_email(company: dict | None) -> dict | None:
 
 
 # ================= PUBLIC PREVIEW =================
-@router.post("/{template_id}/preview")
-async def public_preview(template_id: str, data: dict):
+@router.post("/{template_id}/preview", status_code=202)
+async def public_preview(
+    template_id: str,
+    data: dict,
+    _=Depends(rate_limit("public-render-preview", settings.render_rate_limit, authenticated=False)),
+):
 
     template = await db.templates.find_one({
         "_id": ObjectId(template_id),
@@ -104,82 +127,31 @@ async def public_preview(template_id: str, data: dict):
     company = normalize_company(company)
 
     template_type = str(template.get("type", "video")).lower()
-
-    # IMAGE TEMPLATE
-    if template_type in ("img", "image"):
-
-        filename = f"{template_id}_public_preview.jpg"
-        preview_path = _template_output_path(template, template_id, filename)
-
-        tpl_json = deepcopy(template.get("template_json", {}))
-        fields_snapshot = deepcopy(fields)
-        customer_snapshot = deepcopy(customer)
-        company_snapshot = deepcopy(company)
-
-        async def work(job_id: str, output_path: str, _folder: str):
-            job_tpl_json = deepcopy(tpl_json)
-            _apply_fields_to_template(
-                job_tpl_json, deepcopy(fields_snapshot), deepcopy(customer_snapshot), deepcopy(company_snapshot)
-            )
-            await asyncio.to_thread(
-                render_image_preview,
-                job_tpl_json,
-                deepcopy(customer_snapshot),
-                deepcopy(company_snapshot),
-                output_path
-            )
-            shutil.copyfile(output_path, preview_path)
-
-        await run_render_job(kind="public_image_preview", extension="jpg", work=work)
-        return FileResponse(
-            preview_path,
-            media_type="image/jpeg",
-            filename=filename
-        )
-
-    # VIDEO TEMPLATE
-    filename = f"{template_id}_public_preview.mp4"
-    preview_path = _template_output_path(template, template_id, filename)
-
-    full_template = deepcopy(template)
-    fields_snapshot = deepcopy(fields)
-    customer_snapshot = deepcopy(customer)
-    company_snapshot = deepcopy(company)
-
-    async def work(job_id: str, output_path: str, folder: str):
-        job_template = deepcopy(full_template)
-        tpl_json = job_template.get("template_json", {}) or {}
-        _apply_fields_to_template(tpl_json, deepcopy(fields_snapshot), deepcopy(customer_snapshot), deepcopy(company_snapshot))
-        await _apply_dynamic_audio_to_template(
-            tpl_json,
-            fields=deepcopy(fields_snapshot),
-            customer=deepcopy(customer_snapshot),
-            company=deepcopy(company_snapshot),
-            company_id=str(template.get("company_id") or ""),
-            folder_path=folder,
-        )
-        job_template["template_json"] = tpl_json
-        await asyncio.to_thread(
-            render_preview,
-            job_template,
-            {
-                "customer": deepcopy(customer_snapshot),
-                "company": deepcopy(company_snapshot)
-            },
-            output_path
-        )
-        shutil.copyfile(output_path, preview_path)
-
-    # Return the generated file directly so clients receive a usable URL/file
-    await run_render_job(kind="public_video_preview", extension="mp4", work=work)
-    return FileResponse(
-        preview_path,
-        media_type="video/mp4",
-        filename=filename
+    is_image = template_type in ("img", "image")
+    job_template = deepcopy(template)
+    template_json = job_template.get("template_json", {}) or {}
+    _apply_fields_to_template(template_json, deepcopy(fields), deepcopy(customer), deepcopy(company))
+    job_template["template_json"] = template_json
+    job = await enqueue_celery_render_job(
+        kind="public_image_preview" if is_image else "public_video_preview",
+        extension="jpg" if is_image else "mp4",
+        company_id=str(company_id),
+        template_id=template_id,
+        public_access=True,
+        payload={
+            "template": job_template,
+            "context": {"customer": customer, "company": company},
+            "dynamic_tts": not is_image,
+        },
     )
+    return {"message": "Preview queued", **job}
 
-@router.post("/{template_id}/download")
-async def public_download(template_id: str, data: dict):
+@router.post("/{template_id}/download", status_code=202)
+async def public_download(
+    template_id: str,
+    data: dict,
+    _=Depends(rate_limit("public-render-download", settings.render_rate_limit, authenticated=False)),
+):
 
     template = await db.templates.find_one({
         "_id": ObjectId(template_id),
@@ -203,78 +175,24 @@ async def public_download(template_id: str, data: dict):
     company = normalize_company(company)
 
     template_type = str(template.get("type", "video")).lower()
-
-    # IMAGE
-    if template_type in ("img", "image"):
-
-        filename = f"{template_id}_download.jpg"
-        preview_path = _template_output_path(template, template_id, filename)
-
-        tpl_json = deepcopy(template.get("template_json", {}))
-        fields_snapshot = deepcopy(fields)
-        customer_snapshot = deepcopy(customer)
-        company_snapshot = deepcopy(company)
-
-        async def work(job_id: str, output_path: str, _folder: str):
-            job_tpl_json = deepcopy(tpl_json)
-            _apply_fields_to_template(
-                job_tpl_json, deepcopy(fields_snapshot), deepcopy(customer_snapshot), deepcopy(company_snapshot)
-            )
-            await asyncio.to_thread(
-                render_image_preview,
-                job_tpl_json,
-                deepcopy(customer_snapshot),
-                deepcopy(company_snapshot),
-                output_path
-            )
-            shutil.copyfile(output_path, preview_path)
-
-        await run_render_job(kind="public_image_download", extension="jpg", work=work)
-        return FileResponse(
-            preview_path,
-            media_type="image/jpeg",
-            filename=filename
-        )
-
-    # VIDEO
-    filename = f"{template_id}_download.mp4"
-    preview_path = _template_output_path(template, template_id, filename)
-
-    full_template = deepcopy(template)
-    fields_snapshot = deepcopy(fields)
-    customer_snapshot = deepcopy(customer)
-    company_snapshot = deepcopy(company)
-
-    async def work(job_id: str, output_path: str, folder: str):
-        job_template = deepcopy(full_template)
-        tpl_json = job_template.get("template_json", {}) or {}
-        _apply_fields_to_template(tpl_json, deepcopy(fields_snapshot), deepcopy(customer_snapshot), deepcopy(company_snapshot))
-        await _apply_dynamic_audio_to_template(
-            tpl_json,
-            fields=deepcopy(fields_snapshot),
-            customer=deepcopy(customer_snapshot),
-            company=deepcopy(company_snapshot),
-            company_id=str(template.get("company_id") or ""),
-            folder_path=folder,
-        )
-        job_template["template_json"] = tpl_json
-        await asyncio.to_thread(
-            render_preview,
-            job_template,
-            {
-                "customer": deepcopy(customer_snapshot),
-                "company": deepcopy(company_snapshot)
-            },
-            output_path
-        )
-        shutil.copyfile(output_path, preview_path)
-
-    await run_render_job(kind="public_video_download", extension="mp4", work=work)
-    return FileResponse(
-        preview_path,
-        media_type="video/mp4",
-        filename=filename
+    is_image = template_type in ("img", "image")
+    job_template = deepcopy(template)
+    template_json = job_template.get("template_json", {}) or {}
+    _apply_fields_to_template(template_json, deepcopy(fields), deepcopy(customer), deepcopy(company))
+    job_template["template_json"] = template_json
+    job = await enqueue_celery_render_job(
+        kind="public_image_download" if is_image else "public_video_download",
+        extension="jpg" if is_image else "mp4",
+        company_id=str(company_id),
+        template_id=template_id,
+        public_access=True,
+        payload={
+            "template": job_template,
+            "context": {"customer": customer, "company": company},
+            "dynamic_tts": not is_image,
+        },
     )
+    return {"message": "Render queued", **job}
 
 @router.patch("/{template_id}/increment-download")
 async def increment_download_counts(

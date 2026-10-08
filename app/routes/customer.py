@@ -6,12 +6,17 @@ from typing import Union, List, Dict, Any
 import io
 import csv
 import os
+import logging
+import re
 from openpyxl import load_workbook
 
 from app.db.connection import db
 from app.utils.auth import require_roles, hash_password
 from app.models.customer_model import CustomerCreate, CustomerOut
 from fastapi import Request, UploadFile, File, Form
+from app.services.media_validator import validate_image
+from app.core.tenancy import company_id_for_user, company_object_id_filter
+from app.core.pagination import PaginationParams, page_result
 from app.services.storage import delete_media_file, delete_media_folder, save_customer_file
 from app.services.url import build_media_url
 from fastapi import Request
@@ -21,9 +26,102 @@ from pymongo.errors import DuplicateKeyError
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/customer", tags=["Customer Management"])
+logger = logging.getLogger(__name__)
+
+CUSTOMER_LOGO_EXTENSIONS = (".png", ".jpg", ".jpeg")
+CUSTOMER_LOGO_EXTENSION_PRIORITY = {".png": 0, ".jpeg": 1, ".jpg": 2}
+CUSTOMER_LOGO_FORM_FIELDS = {
+    "logo_files",
+    "logo_files[]",
+    "logo_file",
+    "logoFiles",
+    "logos",
+    "files",
+}
 
 class DeleteCustomersRequest(BaseModel):
     customer_ids: List[str]
+
+
+def _normalize_logo_filename(value: Any) -> str:
+    """Return a safe filename reference from a CSV/Excel cell."""
+    if value is None:
+        return ""
+    return os.path.basename(str(value).strip().replace("\\", "/"))
+
+
+def _build_logo_maps(logo_files: List[UploadFile]):
+    by_filename = {}
+    by_stem = {}
+
+    for logo_file in logo_files:
+        filename = _normalize_logo_filename(logo_file.filename)
+        if not filename:
+            continue
+
+        filename_key = filename.casefold()
+        by_filename[filename_key] = logo_file
+
+        stem, extension = os.path.splitext(filename_key)
+        if extension not in CUSTOMER_LOGO_EXTENSIONS:
+            continue
+        existing = by_stem.get(stem)
+        if existing is None:
+            by_stem[stem] = logo_file
+            continue
+
+        existing_extension = os.path.splitext(
+            _normalize_logo_filename(existing.filename).casefold()
+        )[1]
+        if (
+            CUSTOMER_LOGO_EXTENSION_PRIORITY[extension]
+            < CUSTOMER_LOGO_EXTENSION_PRIORITY[existing_extension]
+        ):
+            by_stem[stem] = logo_file
+
+    return by_filename, by_stem
+
+
+def _logo_files_from_form(form, logo_files: List[UploadFile]) -> List[UploadFile]:
+    if logo_files:
+        return list(logo_files)
+
+    return [
+        value
+        for key, value in form.multi_items()
+        if key in CUSTOMER_LOGO_FORM_FIELDS
+        and getattr(value, "filename", None)
+        and callable(getattr(value, "read", None))
+    ]
+
+
+def _resolve_logo_file(
+    logo_filename: str,
+    logo_files_by_filename: Dict[str, UploadFile],
+    logo_files_by_stem: Dict[str, UploadFile],
+    row_num: int,
+) -> UploadFile:
+    filename_key = logo_filename.casefold()
+    stem, extension = os.path.splitext(filename_key)
+
+    if extension:
+        if extension not in CUSTOMER_LOGO_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Row {row_num}: Logo must be a PNG, JPG, or JPEG file",
+            )
+        logo_file = logo_files_by_filename.get(filename_key)
+        if logo_file is None:
+            logo_file = logo_files_by_stem.get(stem)
+    else:
+        logo_file = logo_files_by_stem.get(stem)
+
+    if logo_file is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Row {row_num}: Logo '{logo_filename}' was not found in uploaded logo files",
+        )
+    return logo_file
 
 async def generate_distributed_id() -> str:
     """
@@ -87,13 +185,13 @@ def delete_customer_media(customer: dict):
 
 @router.post("/bulk-upload")
 async def bulk_upload_customers(
+    request: Request,
     excel_file: UploadFile = File(...),
     logo_files: List[UploadFile] = File(default=[]),
     linked_company_id: str = Form(None),
     user=Depends(require_roles("superadmin", "company")),
 ):
 
-    print("Received logos:", [file.filename for file in logo_files])
 
     try:
         filename = excel_file.filename.lower()
@@ -138,26 +236,12 @@ async def bulk_upload_customers(
         if not headers:
             raise HTTPException(status_code=400, detail="Headers missing")
 
-        # -------- Build Logo Map (full name + stem) --------
-        logo_files_map = {}         # full filename (lowercase) -> UploadFile
-        logo_files_map_no_ext = {}  # filename stem (lowercase) -> UploadFile or None if ambiguous
+        if not logo_files:
+            logo_files = _logo_files_from_form(await request.form(), logo_files)
 
-        for f in logo_files:
-            if not f.filename:
-                continue
-            fname = f.filename.strip()
-            key_full = fname.lower()
-            logo_files_map[key_full] = f
+        # An import may use either "customer_logo1" or "customer_logo1.png".
+        logo_files_map, logo_files_map_no_ext = _build_logo_maps(logo_files)
 
-            stem = os.path.splitext(fname)[0].lower()
-            if stem in logo_files_map_no_ext:
-                # mark ambiguous stems as None so we can error on ambiguity
-                logo_files_map_no_ext[stem] = None
-            else:
-                logo_files_map_no_ext[stem] = f
-
-        print("Logo map (full):", list(logo_files_map.keys()))
-        print("Logo map (stem):", [k for k in logo_files_map_no_ext.keys()])
 
         # -------- Resolve Company --------
         company_id = None
@@ -178,7 +262,6 @@ async def bulk_upload_customers(
         # -------- Process Rows --------
         results = []
         row_num = 2
-        logo_path_cache = {}
         for row_data in rows_data:
 
             if not any(row_data.get(f) for f in ["password", "full_name", "distributed_id"]):
@@ -187,8 +270,8 @@ async def bulk_upload_customers(
 
             try:
                 logo_filename = (
-                    str(row_data.get("logo_url", "")).strip()
-                    or str(row_data.get("logo_file_name", "")).strip()
+                    _normalize_logo_filename(row_data.get("logo_url"))
+                    or _normalize_logo_filename(row_data.get("logo_file_name"))
                 )
 
                 logo_file = None
@@ -203,44 +286,15 @@ async def bulk_upload_customers(
                                 detail=f"Row {row_num}: Logo '{logo_filename}' mentioned but no logo files uploaded"
                             )
 
-                        # Try exact match (case-insensitive) first, then try matching by stem (without extension)
-                        logo_filename_key = str(logo_filename).strip().lower()
-                        logo_file = None
-
-                        if logo_filename_key in logo_files_map:
-                            logo_file = logo_files_map[logo_filename_key]
-
-                        else:
-                            stem = os.path.splitext(logo_filename_key)[0]
-                            if stem in logo_files_map_no_ext:
-                                if logo_files_map_no_ext[stem] is None:
-                                    # ambiguous: multiple uploaded files share the same stem
-                                    raise HTTPException(
-                                        status_code=400,
-                                        detail=f"Row {row_num}: Ambiguous logo name '{logo_filename}' matches multiple uploaded files"
-                                    )
-                                logo_file = logo_files_map_no_ext[stem]
-
-                        if not logo_file:
-                            raise HTTPException(
-                                status_code=400,
-                                detail=f"Row {row_num}: Logo filename mismatch '{logo_filename}' not found in uploaded files"
-                            )
-
-                        validate_image_file(logo_file)
-
-                        # Reuse cached (cache keyed by normalized name)
-                        if logo_filename_key in logo_path_cache:
-                            logo_url = logo_path_cache[logo_filename_key]
-
-                        # Save if uploaded and we have a company to save under
-                        elif company_id:
-                            path = None
-                            logo_url = path   # ✅ store raw path only
-                            logo_path_cache[logo_filename_key] = path
-
-                        else:
-                            print(f"Logo not uploaded: {logo_filename}")
+                        logo_file = _resolve_logo_file(
+                            logo_filename,
+                            logo_files_map,
+                            logo_files_map_no_ext,
+                            row_num,
+                        )
+                        await logo_file.seek(0)
+                        await validate_image(logo_file)
+                        await logo_file.seek(0)
 
                 customer_data = {
                     "distributed_id": str(row_data.get("distributed_id") or "").strip() or None,
@@ -310,7 +364,6 @@ def to_oid(value: str):
 # --------------------------------------------------------
 async def create_single_customer(data: Dict[str, Any], user: Dict):
     try:
-        print("Creating single customer with data:", data)
 
         # -----------------------------
         # ✅ REQUIRED FIELD VALIDATION
@@ -364,9 +417,8 @@ async def create_single_customer(data: Dict[str, Any], user: Dict):
         customer_email = str(data.get("email") or "").strip().lower() or None
 
         if customer_email:
-            company_oid = to_oid(data["linked_company_id"])
             exists_in_company = await db.customers.find_one(
-                {"linked_company_id": company_oid, "email": customer_email}
+                {"linked_company_id": company_object_id_filter(str(data["linked_company_id"])), "email": customer_email}
             )
             if exists_in_company:
                 raise HTTPException(
@@ -409,7 +461,7 @@ async def create_single_customer(data: Dict[str, Any], user: Dict):
             "phone_number": data.get("phone_number"),
             "telephone_number": data.get("telephone_number"),
             "address": data.get("address"),
-            "linked_company_id": to_oid(data["linked_company_id"]),
+            "linked_company_id": str(data["linked_company_id"]),
             "customer_category": data.get("customer_category"),  
             "user_id": user_id,
             "status": "active",
@@ -430,7 +482,7 @@ async def create_single_customer(data: Dict[str, Any], user: Dict):
         raise  # re-raise validation errors
 
     except Exception as e:
-        print("🔥 INTERNAL ERROR:", str(e))
+        logger.exception("Customer creation failed")
         raise HTTPException(
             status_code=500,
             detail=f"Internal error: {str(e)}"
@@ -492,7 +544,6 @@ async def create_customer_handler(
     # ----------------------------------
     elif content_type.startswith("multipart/form-data"):
         form = await request.form()
-        print("Form data:", form)
         # Convert form-data → dict (NO bytes issue)
         data = dict(form)
 
@@ -500,7 +551,8 @@ async def create_customer_handler(
         data.pop("logo_file", None)
 
         if logo_file:
-            validate_image_file(logo_file)
+            await validate_image(logo_file)
+            await logo_file.seek(0)
 
         result = await create_single_customer(data, user)
         if logo_file:
@@ -511,7 +563,6 @@ async def create_customer_handler(
                 {"$set": {"logo_url": path, "updated_at": datetime.utcnow()}}
             )
             result["logo_url"] = path
-            print("Logo saved at:", path)
         return result
 
     else:
@@ -521,7 +572,13 @@ async def create_customer_handler(
 # 🔵 LIST CUSTOMERS WITH USER + COMPANY JOIN
 # --------------------------------------------------------
 @router.get("/")
-async def list_customers(request: Request,user=Depends(require_roles("superadmin", "company"))):
+async def list_customers(
+    request: Request,
+    pagination: PaginationParams = Depends(),
+    status: str | None = None,
+    category: str | None = None,
+    user=Depends(require_roles("superadmin", "company")),
+):
 
     # ✅ FILTER: Company users can only see their own customers
     match_stage = {}
@@ -529,7 +586,19 @@ async def list_customers(request: Request,user=Depends(require_roles("superadmin
         company = await db.companies.find_one({"user_id": str(user["_id"])})
         if not company:
             raise HTTPException(status_code=404, detail="Company not found for this user")
-        match_stage["linked_company_id"] = company["_id"]
+        match_stage["linked_company_id"] = company_object_id_filter(str(company["_id"]))
+    if status:
+        match_stage["status"] = status
+    if category:
+        match_stage["customer_category"] = category
+    if pagination.search:
+        escaped = re.escape(pagination.search)
+        match_stage["$or"] = [
+            {"full_name": {"$regex": escaped, "$options": "i"}},
+            {"email": {"$regex": escaped, "$options": "i"}},
+            {"distributed_id": {"$regex": escaped, "$options": "i"}},
+            {"customer_company_name": {"$regex": escaped, "$options": "i"}},
+        ]
 
     pipeline = []
     
@@ -537,7 +606,12 @@ async def list_customers(request: Request,user=Depends(require_roles("superadmin
     if match_stage:
         pipeline.append({"$match": match_stage})
     
+    total = await db.customers.count_documents(match_stage)
+    sort_field, sort_direction = pagination.sort({"created_at", "updated_at", "full_name", "distributed_id"})
     pipeline.extend([
+        {"$sort": {sort_field: sort_direction}},
+        {"$skip": pagination.skip},
+        {"$limit": pagination.limit},
         {
             "$lookup": {
                 "from": "users",
@@ -550,8 +624,13 @@ async def list_customers(request: Request,user=Depends(require_roles("superadmin
         {
             "$lookup": {
                 "from": "companies",
-                "localField": "linked_company_id",
-                "foreignField": "_id",
+                "let": {"company_id": "$linked_company_id"},
+                "pipeline": [{
+                    "$match": {"$expr": {"$eq": [
+                        "$_id",
+                        {"$convert": {"input": "$$company_id", "to": "objectId", "onError": None, "onNull": None}},
+                    ]}}
+                }],
                 "as": "company",
             }
         },
@@ -586,7 +665,9 @@ async def list_customers(request: Request,user=Depends(require_roles("superadmin
 
         data.append(doc)
 
-    return data
+    result = page_result(data, total, pagination)
+    result["customers"] = result.pop("items")
+    return result
 
 # --------------------------------------------------------
 # 🔵 GET SINGLE CUSTOMER
@@ -601,7 +682,7 @@ async def get_customer(customer_id: str, user=Depends(require_roles("superadmin"
         company = await db.companies.find_one({"user_id": str(user["_id"])})
         if not company:
             raise HTTPException(status_code=404, detail="Company not found for this user")
-        match_filter["linked_company_id"] = company["_id"]
+        match_filter["linked_company_id"] = company_object_id_filter(str(company["_id"]))
 
     pipeline = [
         {"$match": match_filter},
@@ -617,8 +698,13 @@ async def get_customer(customer_id: str, user=Depends(require_roles("superadmin"
         {
             "$lookup": {
                 "from": "companies",
-                "localField": "linked_company_id",
-                "foreignField": "_id",
+                "let": {"company_id": "$linked_company_id"},
+                "pipeline": [{
+                    "$match": {"$expr": {"$eq": [
+                        "$_id",
+                        {"$convert": {"input": "$$company_id", "to": "objectId", "onError": None, "onNull": None}},
+                    ]}}
+                }],
                 "as": "company",
             }
         },
@@ -673,8 +759,11 @@ async def update_customer(
     customer_category: str = Form(None),  # NEW FIELD
     user=Depends(require_roles("company"))
 ):
-    # ---- Check customer exists ----
-    customer = await db.customers.find_one({"_id": ObjectId(customer_id)})
+    company_id = await company_id_for_user(user)
+    customer = await db.customers.find_one({
+        "_id": ObjectId(customer_id),
+        "linked_company_id": company_object_id_filter(company_id),
+    })
     if not customer:
         raise HTTPException(404, "Customer not found")
 
@@ -696,7 +785,8 @@ async def update_customer(
     if status is not None:
         update_data["status"] = status
     if logo_url is not None:
-        validate_image_file(logo_url)
+        await validate_image(logo_url)
+        await logo_url.seek(0)
 
         path, _ = await save_customer_file(
             logo_url,
@@ -733,10 +823,11 @@ async def delete_customers(
 ):
 
     object_ids = [to_oid(cid) for cid in payload.customer_ids]
-
-    customers = await db.customers.find(
-        {"_id": {"$in": object_ids}}
-    ).to_list(length=None)
+    query = {"_id": {"$in": object_ids}}
+    if user.get("role") == "company":
+        company_id = await company_id_for_user(user)
+        query["linked_company_id"] = company_object_id_filter(company_id)
+    customers = await db.customers.find(query).to_list(length=None)
 
     if not customers:
         raise HTTPException(status_code=404, detail="Customers not found")
@@ -744,9 +835,7 @@ async def delete_customers(
     user_ids = [customer["user_id"] for customer in customers]
 
     # Delete customers
-    await db.customers.delete_many({
-        "_id": {"$in": object_ids}
-    })
+    await db.customers.delete_many({"_id": {"$in": [customer["_id"] for customer in customers]}})
 
     # Delete linked users
     await db.users.delete_many({
@@ -766,8 +855,11 @@ async def delete_customers(
 # --------------------------------------------------------
 @router.delete("/{customer_id}")
 async def delete_customer(customer_id: str, user=Depends(require_roles("superadmin", "company"))):
-
-    customer = await db.customers.find_one({"_id": to_oid(customer_id)})
+    query = {"_id": to_oid(customer_id)}
+    if user.get("role") == "company":
+        company_id = await company_id_for_user(user)
+        query["linked_company_id"] = company_object_id_filter(company_id)
+    customer = await db.customers.find_one(query)
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 

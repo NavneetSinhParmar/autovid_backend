@@ -1,6 +1,10 @@
 import os
 import shutil
 import uuid
+import hashlib
+import tempfile
+from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Tuple
 
 LOCAL_MEDIA_ROOT = os.getenv("LOCAL_MEDIA_ROOT", "./media")
@@ -64,7 +68,8 @@ def template_folder_path(company_id: str, template_id: str) -> str:
 
 def save_file_local(file_obj: bytes, folder_path: str, filename: str) -> str:
     folder_path = ensure_media_folder(folder_path)
-    unique_name = f"{uuid.uuid4().hex}_{filename}"
+    safe_name = Path(filename or "upload.bin").name.replace(" ", "_")
+    unique_name = f"{uuid.uuid4().hex}_{safe_name}"
     full_path = get_media_abs_path(f"{folder_path}/{unique_name}")
 
     with open(full_path, "wb") as f:
@@ -75,36 +80,99 @@ def save_file_local(file_obj: bytes, folder_path: str, filename: str) -> str:
 
 async def save_company_file(file, company_user_id: str):
     content = await file.read()
-    path = save_file_local(content, company_user_id, file.filename)
+    path = storage_service.save(content, company_user_id, file.filename)
     return path, len(content)
 
 
 async def save_customer_file(file, company_id: str, customer_id: str):
     content = await file.read()
     folder = customer_folder_path(company_id, customer_id)
-    path = save_file_local(content, folder, file.filename)
+    path = storage_service.save(content, folder, file.filename)
     return path, len(content)
 
 
 def save_file_local_for_media(file_obj: bytes, folder_path: str, filename: str) -> str:
-    print(f"Saving file in media folder {folder_path} with filename {filename}")
-    folder_path = ensure_media_folder(folder_path)
-    unique_name = f"{uuid.uuid4().hex}_{filename}"
-    full_path = get_media_abs_path(f"{folder_path}/{unique_name}")
-    print("Saving file to:", full_path)
-
-    with open(full_path, "wb") as f:
-        f.write(file_obj)
-
-    # Return relative path without a media prefix; url.py adds /media/ when needed.
-    return f"{folder_path}/{unique_name}"
+    return save_file_local(file_obj, folder_path, filename)
 
 
 async def save_upload_file(file, company_id: str, folder_path: str | None = None) -> Tuple[str, int]:
-    print("Saving uploaded file for company:", company_id)
     content = await file.read()
-    path = save_file_local_for_media(content, folder_path or company_id, file.filename)
+    path = storage_service.save(content, folder_path or company_id, file.filename)
     return path, len(content)
+
+
+class StorageService(ABC):
+    def save_cached(self, content: bytes, folder_path: str, filename: str) -> str:
+        return self.save(content, folder_path, filename)
+
+    @abstractmethod
+    def save(self, content: bytes, folder_path: str, filename: str) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete(self, relative_path: str) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    def absolute_path(self, relative_path: str) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def exists(self, relative_path: str) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    def ensure_folder(self, folder_path: str) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete_folder(self, folder_path: str) -> bool:
+        raise NotImplementedError
+
+
+class LocalStorageService(StorageService):
+    def save_cached(self, content: bytes, folder_path: str, filename: str) -> str:
+        folder = ensure_media_folder(folder_path)
+        suffix = Path(filename).suffix.lower() or ".bin"
+        digest = hashlib.sha256(content).hexdigest()
+        relative = f"{folder}/{digest}{suffix}"
+        target = get_media_abs_path(relative)
+        if os.path.isfile(target):
+            return relative
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=os.path.dirname(target), delete=False) as handle:
+                temporary = handle.name
+                handle.write(content)
+            try:
+                os.link(temporary, target)
+            except FileExistsError:
+                pass  # A concurrent upload already published these bytes.
+        finally:
+            if temporary and os.path.isfile(temporary):
+                os.remove(temporary)
+        return relative
+
+    def save(self, content: bytes, folder_path: str, filename: str) -> str:
+        return save_file_local(content, folder_path, filename)
+
+    def delete(self, relative_path: str) -> bool:
+        return delete_media_file(relative_path)
+
+    def absolute_path(self, relative_path: str) -> str:
+        return get_media_abs_path(relative_path)
+
+    def exists(self, relative_path: str) -> bool:
+        return os.path.isfile(get_media_abs_path(relative_path))
+
+    def ensure_folder(self, folder_path: str) -> str:
+        return ensure_media_folder(folder_path)
+
+    def delete_folder(self, folder_path: str) -> bool:
+        return delete_media_folder(folder_path)
+
+
+storage_service: StorageService = LocalStorageService()
 
 
 async def save_template_file(file, company_id: str, template_id: str) -> Tuple[str, int]:

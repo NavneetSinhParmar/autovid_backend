@@ -15,6 +15,10 @@ from app.services.kokoro_tts import (
     get_pipeline,
     synthesize_and_store_media,
 )
+from app.services.render_queue import enqueue_celery_render_job
+from app.core.rate_limit import rate_limit
+from app.core.settings import settings
+from app.core.tenancy import company_id_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -110,58 +114,21 @@ def serialize_mongo(data):
 def list_voices():
     return {"voices": VOICES}
 
-@router.post("/tts")
+@router.post("/tts", status_code=202)
 async def tts_to_media(
     request: TTSRequest,
-    user=Depends(require_roles("superadmin", "company"))
+    user=Depends(rate_limit("tts", settings.tts_rate_limit))
 ):
-    # 1. Resolve company_id
-    if user["role"] == "company":
-        company = await db.companies.find_one({"user_id": str(user["_id"])})
-        if not company:
-            raise HTTPException(404, "Company record not found for this user")
-        company_id = str(company["_id"])
-    else:
-        company_id = request.company_id  # superadmin provides it in body
-
-    if not company_id:
-        raise HTTPException(400, "company_id is required")
-
-    voicetext = request.voisetext
-    voice = request.voice
-    speed = request.speed
-
-    # 3. Generate + store audio
-    try:
-        stored = await synthesize_and_store_media(
-            company_id=company_id,
-            voisetext=voicetext,
-            voice=voice,
-            speed=speed,
-        )
-        local_path = stored["file_url"]
-        size = stored["size"]
-        filename = stored["original_name"]
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("TTS generation failed")
-        raise HTTPException(500, f"TTS generation failed: {e}")
-
-    # 6. Insert media document
-    media_doc = {
-        "company_id": company_id,
-        "file_url": local_path,
-        "file_type": "audio",
-        "original_name": filename,
-        "size": size,
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow(),
-    }
-    result = await db.media.insert_one(media_doc)
-    media_doc["id"] = str(result.inserted_id)
-
-    return {"media": serialize_mongo(media_doc)}
+    if user.get("role") not in {"superadmin", "company"}:
+        raise HTTPException(403, "Access denied")
+    company_id = await company_id_for_user(user, request.company_id)
+    job = await enqueue_celery_render_job(
+        kind="tts",
+        extension="mp3",
+        company_id=company_id,
+        payload={"voisetext": request.voisetext, "voice": request.voice, "speed": request.speed},
+    )
+    return {"message": "TTS generation queued", **job}
 
 @router.get("/health")
 def health():

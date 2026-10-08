@@ -1,72 +1,67 @@
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
 from datetime import datetime
 from bson import ObjectId
-from app.services.storage import save_upload_file
+from app.services.storage import storage_service
+from app.services.media_validator import validate_media
+from app.services.media_upload import validate_and_store_media
+from app.core.rate_limit import rate_limit
+from app.core.settings import settings
+from app.core.tenancy import company_id_for_user
+from app.core.pagination import PaginationParams, page_result
+from app.core.serialization import serialize_mongo, serialize_document
+import re
 from app.utils.auth import require_roles
 from app.db.connection import db
 
 router = APIRouter(prefix="/media-api", tags=["media"])
 
+
+@router.get("")
+async def list_media(
+    company_id: str | None = None,
+    pagination: PaginationParams = Depends(),
+    file_type: str | None = None,
+    user=Depends(require_roles("superadmin", "company")),
+):
+    company_id = await company_id_for_user(user, company_id)
+    query = {"company_id": company_id}
+    if file_type:
+        query["file_type"] = file_type
+    if pagination.search:
+        query["original_name"] = {"$regex": re.escape(pagination.search), "$options": "i"}
+    total = await db.media.count_documents(query)
+    sort_field, sort_direction = pagination.sort({"created_at", "updated_at", "original_name", "size"})
+    docs = await db.media.find(query).sort(sort_field, sort_direction).skip(pagination.skip).limit(pagination.limit).to_list(pagination.limit)
+    docs = [serialize_document(doc) for doc in docs]
+    return page_result(serialize_mongo(docs), total, pagination)
+
 # -----------------------------------------------------------
 # ObjectId Serializer
 # -----------------------------------------------------------
-def serialize_mongo(data):
-    if isinstance(data, list):
-        return [serialize_mongo(i) for i in data]
-
-    if isinstance(data, dict):
-        new_data = {}
-        for k, v in data.items():
-            if isinstance(v, ObjectId):
-                new_data[k] = str(v)
-            else:
-                new_data[k] = serialize_mongo(v)
-        return new_data
-
-    return data
-
-
 @router.post("/upload")
 async def upload_media(
     file: UploadFile = File(...),
     company_id: str = Form(None),
-    user=Depends(require_roles("superadmin", "company"))
+    user=Depends(rate_limit("media-upload", settings.upload_rate_limit))
 ):
-
-    # 1. Auto-company resolve for company-role
-    if user["role"] == "company":
-        company = await db.companies.find_one({"user_id": str(user["_id"])})
-
-        if not company:
-            raise HTTPException(404, "Company record not found for this user")
-
-        company_id = str(company["_id"])
-
-    # 2. superadmin must provide company_id
-    if user["role"] == "superadmin" and not company_id:
-        raise HTTPException(400, "company_id is required for superadmin")
-
-    # 3. allowed type
-    allowed = ["jpg", "jpeg", "png", "gif", "mp4", "mov", "mp3", "wav"]
-    ext = file.filename.split(".")[-1].lower()
-
-    if ext not in allowed:
-        raise HTTPException(400, "Unsupported file type")
-
-    # 4. Save file
-    local_path, size = await save_upload_file(file, company_id)
+    if user.get("role") not in {"superadmin", "company"}:
+        raise HTTPException(403, "Access denied")
+    company_id = await company_id_for_user(user, company_id)
+    validated, local_path = await validate_and_store_media(file, company_id)
 
     # 5. Create media document
     media_doc = {
         "company_id": company_id,
         "file_url": local_path,
-        "file_type": (
-            "video" if ext in ["mp4", "mov"]
-            else "audio" if ext in ["mp3", "wav"]
-            else "image"
-        ),
+        "file_type": validated.kind,
         "original_name": file.filename,
-        "size": size,
+        "size": validated.size,
+        "metadata": {
+            "duration": validated.duration,
+            "width": validated.width,
+            "height": validated.height,
+            "codec": validated.codec,
+        },
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
     }

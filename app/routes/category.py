@@ -10,6 +10,9 @@ from app.models.category import (
     CategoryOut,
 )
 from app.utils.auth import require_roles
+from app.core.pagination import PaginationParams, page_result
+from app.core.serialization import serialize_document
+import re
 
 router = APIRouter(prefix="/category", tags=["Category"])
 
@@ -85,18 +88,35 @@ async def create_category(
     result = await db.categories.insert_one(doc)
     doc["_id"] = result.inserted_id
 
-    return {"id": str(doc["_id"]), **doc}
+    return serialize_document(doc)
 
 
-@router.get("/", response_model=list[CategoryOut])
+@router.get("/")
 async def get_categories(
+    pagination: PaginationParams = Depends(),
+    company_id: str | None = None,
+    status: str | None = None,
     user=Depends(require_roles("superadmin", "company"))
 ):
     base_filter = await _get_company_filter(user)
+    if user.get("role") == "superadmin" and company_id:
+        base_filter["company_id"] = company_id
+    if status:
+        base_filter["status"] = status
+    if pagination.search:
+        base_filter["$or"] = [
+            {"name": {"$regex": re.escape(pagination.search), "$options": "i"}},
+            {"description": {"$regex": re.escape(pagination.search), "$options": "i"}},
+        ]
+    total = await db.categories.count_documents(base_filter)
+    sort_field, sort_direction = pagination.sort({"created_at", "updated_at", "name", "status"})
     categories = []
-    async for cat in db.categories.find(base_filter):
-        categories.append({"id": str(cat["_id"]), **cat})
-    return categories
+    cursor = db.categories.find(base_filter).sort(sort_field, sort_direction).skip(pagination.skip).limit(pagination.limit)
+    async for cat in cursor:
+        categories.append(serialize_document(cat))
+    result = page_result(categories, total, pagination)
+    result["categories"] = result.pop("items")
+    return result
 
 
 @router.get("/{category_id}", response_model=CategoryOut)
@@ -112,7 +132,7 @@ async def get_category(
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
 
-    return {"id": str(category["_id"]), **category}
+    return serialize_document(category)
 
 
 @router.patch("/{category_id}", response_model=CategoryOut)
@@ -139,7 +159,7 @@ async def update_category(
         raise HTTPException(status_code=404, detail="Category not found")
 
     category = await db.categories.find_one({"_id": ObjectId(category_id)})
-    return {"id": str(category["_id"]), **category}
+    return serialize_document(category)
 
 
 @router.delete("/{category_id}")

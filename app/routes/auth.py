@@ -6,31 +6,54 @@ from app.utils.auth import blacklist_token, oauth2_scheme, get_current_user,vali
 from app.db.connection import db
 from bson import ObjectId
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
+from app.core.rate_limit import rate_limit
+from app.core.settings import settings
+from app.core.tenancy import object_id
+from app.models.api_model import PasswordChangeRequest
 
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 class ResetPasswordRequest(BaseModel):
-    user_id: str = None
-    old_password: str = None
-    new_password: str
+    user_id: str | None = None
+    old_password: str | None = None
+    new_password: str = Field(min_length=10, max_length=72)
+
+
+class PublicRegistrationRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=100)
+    email: EmailStr
+    password: str = Field(min_length=10, max_length=72)
+    role: str = "customer"
+
+
+class LoginRequest(BaseModel):
+    username: str | None = None
+    email: EmailStr | None = None
+    password: str
 
 
 @router.post("/register")
-async def register_user(data: dict):
+async def register_user(
+    data: PublicRegistrationRequest,
+    _=Depends(rate_limit("auth-register", 10, authenticated=False)),
+):
     # 1️⃣ Extract required fields
-    username = data.get("username")
-    email = data.get("email")
-    password = data.get("password")
-    role = data.get("role")
+    username = data.username.strip()
+    email = str(data.email).lower()
+    password = data.password
+    role = data.role.lower()
 
     # 2️⃣ Validate role
-    validate_role(role)
+    if role != "customer":
+        raise HTTPException(status_code=403, detail="Public registration can only create customer accounts")
 
     # 3️⃣ Check if already exists
     if await db.users.find_one({"username": username}):
         raise HTTPException(status_code=400, detail="Username already exists")
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="Email already exists")
 
     # 4️⃣ Create new user
     user_doc = {
@@ -46,23 +69,33 @@ async def register_user(data: dict):
     return {"message": "User registered successfully", "role": role}
 
 @router.post("/login")
-async def common_login(data: dict):
-    username_or_email = data.get("username") or data.get("email")
-    password = data.get("password")
+async def common_login(
+    data: LoginRequest,
+    _=Depends(rate_limit("auth-login", 20, authenticated=False)),
+):
+    username_or_email = data.username or (str(data.email).lower() if data.email else None)
+    password = data.password
 
     if not username_or_email or not password:
         raise HTTPException(status_code=400, detail="Username/Email and password required")
 
     # 🔍 Find user by username OR email
-    user = await db.users.find_one({
+    matches = await db.users.find({
         "$or": [
             {"username": username_or_email},
             {"email": username_or_email}
         ]
-    })
+    }).limit(2).to_list(2)
+
+    if len(matches) > 1:
+        raise HTTPException(status_code=409, detail={
+            "code": "AMBIGUOUS_ACCOUNT",
+            "message": "Duplicate login records require administrator review",
+        })
+    user = matches[0] if matches else None
 
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=401, detail="Invalid username or password")
 
     # 🔐 Password verify
     if not verify_password(password, user["password"]):
@@ -90,8 +123,6 @@ async def get_profile(user=Depends(get_current_user)):
 
     role = user.get("role")
     user_id = str(user["_id"])    # convert to string for company / customer lookups
-    print("Fetching profile for user_id:", user, "with role:", role)
-
     if role == "superadmin":
         return {
             "role": "superadmin",
@@ -101,25 +132,25 @@ async def get_profile(user=Depends(get_current_user)):
 
     elif role == "company":
         company = await db.companies.find_one({"user_id": user_id})
-        if company:
-            company["id"] = str(company["_id"])
+        if not company:
+            raise HTTPException(status_code=404, detail="Company profile not found")
+        company["id"] = str(company["_id"])
 
         # Fix logo path before returning
         if company.get("logo_url"):
             company["logo_url"] = f"./media/{company['logo_url']}"
 
-            return {
-                "role": "company",
-                "id": company["id"],
-                "company_name": company["company_name"],
-                "email": user["email"],      # email from users table
-                "mobile": company["mobile"],
-                "status": company["status"],
-                "logo_url": company.get("logo_url"),
-                "visibility": company.get("visibility"),
-                "description": company.get("description")   
-            }
-        raise HTTPException(status_code=404, detail="Company profile not found")
+        return {
+            "role": "company",
+            "id": company["id"],
+            "company_name": company["company_name"],
+            "email": user["email"],
+            "mobile": company["mobile"],
+            "status": company["status"],
+            "logo_url": company.get("logo_url"),
+            "visibility": company.get("visibility"),
+            "description": company.get("description"),
+        }
 
     elif role == "customer":
         customer = await db.customers.find_one({"user_id": user_id})
@@ -139,22 +170,22 @@ async def get_profile(user=Depends(get_current_user)):
     raise HTTPException(status_code=404, detail="User not found")
 
 @router.patch("/forgot-password")
-async def change_user_password(data: dict, user=Depends(require_roles("superadmin"))):
+async def change_user_password(data: PasswordChangeRequest, user=Depends(require_roles("superadmin"))):
 
-    user_id = data.get("user_id")
-    new_password = data.get("new_password")
+    user_id = data.user_id
+    new_password = data.new_password
 
     if not user_id or not new_password:
         raise HTTPException(status_code=400, detail="user_id and new_password required")
 
     # Check target user exists
-    target_user = await db.users.find_one({"_id": ObjectId(user_id)})
+    target_user = await db.users.find_one({"_id": object_id(user_id, "user_id")})
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
 
     # Update password
     result = await db.users.update_one(
-        {"_id": ObjectId(user_id)},
+        {"_id": object_id(user_id, "user_id")},
         {"$set": {"password": hash_password(new_password)}}
     )
 
@@ -178,7 +209,7 @@ async def reset_password(
             raise HTTPException(403, "You are not allowed to reset other user's password")
 
     # Fetch user by target ID
-    user = await db.users.find_one({"_id": ObjectId(target_user_id)})
+    user = await db.users.find_one({"_id": object_id(target_user_id, "user_id")})
     if not user:
         raise HTTPException(404, "User not found")
 

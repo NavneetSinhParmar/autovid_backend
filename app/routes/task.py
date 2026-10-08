@@ -6,6 +6,9 @@ from bson import ObjectId
 from app.db.connection import db
 from app.utils.auth import require_roles
 from app.services.render_queue import enqueue_celery_render_job, get_persisted_render_job
+from app.core.rate_limit import rate_limit
+from app.core.settings import settings
+from app.core.tenancy import company_object_id_filter, object_id
 
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
 
@@ -22,12 +25,14 @@ def _json_safe_doc(doc: dict) -> dict:
     return safe
 
 
-@router.post("/generate")
+@router.post("/generate", status_code=202)
 async def generate_video(
     template_id: str,
     customer_id: str,
-    user=Depends(require_roles("company"))
+    user=Depends(rate_limit("render-submit", settings.render_rate_limit))
 ):
+    if user.get("role") != "company":
+        raise HTTPException(403, "Company access required")
     # 1. Resolve company
     company = await db.companies.find_one({"user_id": str(user["_id"])})
     if not company:
@@ -35,7 +40,7 @@ async def generate_video(
 
     # 2. Validate template
     template = await db.templates.find_one({
-        "_id": ObjectId(template_id),
+        "_id": object_id(template_id, "template_id"),
         "company_id": str(company["_id"])
     })
     if not template:
@@ -43,8 +48,8 @@ async def generate_video(
 
     # 3. Validate customer
     customer = await db.customers.find_one({
-        "_id": ObjectId(customer_id),
-        "linked_company_id": str(company["_id"])
+        "_id": object_id(customer_id, "customer_id"),
+        "linked_company_id": company_object_id_filter(str(company["_id"]))
     })
     if not customer:
         raise HTTPException(404, "Customer not found")
@@ -80,6 +85,10 @@ async def generate_video(
             kind="task_video_generate",
             extension="mp4",
             video_task_id=task_id,
+            company_id=str(company["_id"]),
+            customer_id=customer_id,
+            template_id=template_id,
+            idempotency_key=f"task:{task_id}",
             payload={
                 "template": template,
                 "context": {"customer": customer_context, "company": company_context},
@@ -105,7 +114,7 @@ async def video_task_status(task_id: str, user=Depends(require_roles("company"))
         raise HTTPException(400, "Company not found")
 
     task = await db.video_tasks.find_one({
-        "_id": ObjectId(task_id),
+        "_id": object_id(task_id, "task_id"),
         "company_id": str(company["_id"]),
     })
     if not task:

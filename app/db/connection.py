@@ -1,10 +1,6 @@
 from motor.motor_asyncio import AsyncIOMotorClient
-from dotenv import load_dotenv
 import os
-import sys
-import ssl
 
-load_dotenv()  # load .env file
 
 # Use certifi's CA bundle for TLS verification with Atlas
 try:
@@ -16,7 +12,8 @@ except Exception:
 MONGO_URL = os.getenv("MONGO_URL")
 DB_NAME = os.getenv("DATABASE_NAME")
 
-print(f"Connecting to MongoDB at: {MONGO_URL}, Database: {DB_NAME}")
+if not MONGO_URL or not DB_NAME:
+	raise RuntimeError("Set MONGO_URL and DATABASE_NAME in the project .env.local file or environment")
 client = AsyncIOMotorClient(MONGO_URL)
 
 # # production code

@@ -5,8 +5,12 @@ from app.db.connection import db
 from app.utils.auth import require_roles, hash_password
 from app.services.storage import delete_media_folder, ensure_media_folder, save_company_file
 from typing import Optional
+import re
 from app.services.url import build_media_url
 from fastapi import Request
+from app.services.media_validator import validate_image
+from app.core.pagination import PaginationParams, page_result
+from app.core.tenancy import company_id_for_user, object_id
 
 router = APIRouter(prefix="/company", tags=["Company Management"])
 
@@ -14,7 +18,7 @@ router = APIRouter(prefix="/company", tags=["Company Management"])
 async def create_company(
     username: str = Form(...),
     email: str = Form(...),
-    password: str = Form(...),
+    password: str = Form(..., min_length=10, max_length=72),
     company_name: str = Form(...),
     mobile: str = Form(...),
     description: str = Form(None),
@@ -29,6 +33,10 @@ async def create_company(
 
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email already exists")
+
+    if logo_file:
+        await validate_image(logo_file)
+        await logo_file.seek(0)
 
     # ---- STEP 2: Create User Entry ----
     user_doc = {
@@ -79,10 +87,36 @@ async def create_company(
 
 # 🔵 Get all companies
 @router.get("/")
-async def list_companies(request: Request, user=Depends(require_roles("superadmin"))):
+async def list_companies(
+    request: Request,
+    pagination: PaginationParams = Depends(),
+    status: str | None = None,
+    visibility: str | None = None,
+    user=Depends(require_roles("superadmin")),
+):
+    query: dict = {}
+    if status:
+        query["status"] = status
+    if visibility:
+        query["visibility"] = visibility
+    if pagination.search:
+        escaped = re.escape(pagination.search)
+        query["$or"] = [
+            {"company_name": {"$regex": escaped, "$options": "i"}},
+            {"mobile": {"$regex": escaped, "$options": "i"}},
+        ]
+    total = await db.companies.count_documents(query)
+    sort_field, sort_direction = pagination.sort({"created_at", "updated_at", "company_name", "status"})
+    pipeline = [
+        {"$match": query}, {"$sort": {sort_field: sort_direction}},
+        {"$skip": pagination.skip}, {"$limit": pagination.limit},
+        {"$addFields": {"user_object_id": {"$convert": {"input": "$user_id", "to": "objectId", "onError": None, "onNull": None}}}},
+        {"$lookup": {"from": "users", "localField": "user_object_id", "foreignField": "_id", "as": "user"}},
+        {"$unwind": {"path": "$user", "preserveNullAndEmptyArrays": True}},
+        {"$project": {"user.password": 0, "user_object_id": 0}},
+    ]
     companies = []
-
-    async for c in db.companies.find():
+    async for c in db.companies.aggregate(pipeline):
 
         # fix company id
         c["company_id"] = str(c["_id"])
@@ -92,11 +126,7 @@ async def list_companies(request: Request, user=Depends(require_roles("superadmi
         if c.get("logo_url"):
             c["logo_url"] = f"media/{c['logo_url']}"
 
-        # join user
-        user_data = await db.users.find_one(
-            {"_id": ObjectId(c["user_id"])},
-            {"password": 0}
-        )
+        user_data = c.pop("user", None)
 
         if user_data:
             # convert user fields
@@ -121,14 +151,22 @@ async def list_companies(request: Request, user=Depends(require_roles("superadmi
 
         companies.append(c)
 
-    return companies
+    result = page_result(companies, total, pagination)
+    result["companies"] = result.pop("items")
+    return result
 
 
 # 🟠 Get single company by ID
 
 @router.get("/{company_id}")
-async def get_company_detail(company_id: str,request: Request):
-    company = await db.companies.find_one({"_id": ObjectId(company_id)})
+async def get_company_detail(
+    company_id: str,
+    request: Request,
+    user=Depends(require_roles("superadmin", "company")),
+):
+    if user.get("role") == "company" and await company_id_for_user(user) != company_id:
+        raise HTTPException(404, "Company not found")
+    company = await db.companies.find_one({"_id": object_id(company_id, "company_id")})
     if not company:
         raise HTTPException(404, "Company not found")
 
@@ -162,7 +200,7 @@ async def update_company(
 ):
 
     # ---- STEP 1: Check company exists ----
-    company = await db.companies.find_one({"_id": ObjectId(company_id)})
+    company = await db.companies.find_one({"_id": object_id(company_id, "company_id")})
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
 
@@ -190,6 +228,8 @@ async def update_company(
 
     # ---- STEP 3: Handle logo upload ----
     if logo_file:
+        await validate_image(logo_file)
+        await logo_file.seek(0)
         local_path, size = await save_company_file(logo_file, company["user_id"])
         update_data["logo_url"] = local_path
 
@@ -200,12 +240,12 @@ async def update_company(
 
     # ---- STEP 4: Update DB ----
     await db.companies.update_one(
-        {"_id": ObjectId(company_id)},
+        {"_id": object_id(company_id, "company_id")},
         {"$set": update_data}
     )
 
    # Get updated company to return
-    updated_company = await db.companies.find_one({"_id": ObjectId(company_id)})
+    updated_company = await db.companies.find_one({"_id": object_id(company_id, "company_id")})
     updated_company["company_id"] = str(updated_company["_id"])
     updated_company.pop("_id", None)
 
@@ -229,7 +269,7 @@ async def delete_company(
     user=Depends(require_roles("superadmin"))
 ):
 
-    company = await db.companies.find_one({"_id": ObjectId(company_id)})
+    company = await db.companies.find_one({"_id": object_id(company_id, "company_id")})
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
 
@@ -240,7 +280,7 @@ async def delete_company(
         raise HTTPException(500, "Invalid user_id stored in company")
 
     customer_docs = await db.customers.find(
-        {"linked_company_id": ObjectId(company_id)}
+        {"linked_company_id": {"$in": [company_id, object_id(company_id, "company_id")]}}
     ).to_list(length=None)
     customer_user_ids = [c["user_id"] for c in customer_docs if c.get("user_id")]
     customer_ids = [c["_id"] for c in customer_docs]
@@ -261,7 +301,7 @@ async def delete_company(
     })
     await db.media.delete_many({"company_id": company_id})
     await db.templates.delete_many({"company_id": company_id})
-    await db.customers.delete_many({"linked_company_id": ObjectId(company_id)})
+    await db.customers.delete_many({"linked_company_id": {"$in": [company_id, object_id(company_id, "company_id")]}})
     if customer_user_ids:
         await db.users.delete_many({"_id": {"$in": customer_user_ids}})
 
@@ -271,7 +311,7 @@ async def delete_company(
         delete_media_folder(str(company["user_id"]))
 
     # Delete company
-    await db.companies.delete_one({"_id": ObjectId(company_id)})
+    await db.companies.delete_one({"_id": object_id(company_id, "company_id")})
 
     # Delete linked user
     result = await db.users.delete_one({"_id": user_object_id})

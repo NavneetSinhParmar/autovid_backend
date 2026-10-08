@@ -10,11 +10,10 @@ import hashlib
 import json 
 import shlex
 import shutil
+import logging
 from bson import ObjectId 
 from app.db.connection import db 
 from app.services.storage import ensure_media_folder, get_media_abs_path, template_folder_path
-from dotenv import load_dotenv
-load_dotenv()
 # ---------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------
@@ -22,11 +21,10 @@ DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
 MEDIA_ROOT = os.getenv("MEDIA_ROOT", "media")
 
-print("📁 MEDIA_ROOT =", MEDIA_ROOT)
+logger = logging.getLogger(__name__)
 
 FFMPEG = "ffmpeg"
 
-print("🔧 FFMPEG =", FFMPEG)
 
 BASE_DIR = os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))
@@ -40,8 +38,6 @@ PX_RE = re.compile(r"-?\d+(\.\d+)?")
 # ---------------------------------------------------------
 
 def abs_media_path(path: str) -> str:
-    print("🔍 abs_media_path input:", path)
-
     path = path.replace("\\", "/")
 
     if path.startswith("http"):
@@ -53,7 +49,6 @@ def abs_media_path(path: str) -> str:
 
     full_path = os.path.join(MEDIA_ROOT, path)
 
-    print("✅ abs_media_path resolved:", full_path)
     return full_path
 
 def ensure_file_exists(path: str):
@@ -313,7 +308,7 @@ def render_video(task_id: str):
         output_path
     ]
 
-    print("🎬 SIMPLE CMD:", " ".join(cmd))
+    logger.debug("Running legacy FFmpeg renderer")
     subprocess.run(cmd, check=True)
 
     return output_path
