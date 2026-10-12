@@ -23,9 +23,9 @@ def _csv(name: str, default: str) -> tuple[str, ...]:
 @dataclass(frozen=True)
 class Settings:
     cors_origins: tuple[str, ...] = _csv("CORS_ORIGINS", "http://localhost:3000")
-    max_image_bytes: int = _int("MAX_IMAGE_UPLOAD_MB", 20) * 1024 * 1024
-    max_video_bytes: int = _int("MAX_VIDEO_UPLOAD_MB", 250) * 1024 * 1024
-    max_audio_bytes: int = _int("MAX_AUDIO_UPLOAD_MB", 25) * 1024 * 1024
+    max_image_bytes: int = _int("MAX_IMAGE_UPLOAD_MB", 60) * 1024 * 1024
+    max_video_bytes: int = _int("MAX_VIDEO_UPLOAD_MB", 60) * 1024 * 1024
+    max_audio_bytes: int = _int("MAX_AUDIO_UPLOAD_MB", 60) * 1024 * 1024
     max_image_width: int = _int("MAX_IMAGE_WIDTH", 8192)
     max_image_height: int = _int("MAX_IMAGE_HEIGHT", 8192)
     max_audio_seconds: float = _float("MAX_AUDIO_SECONDS", 600.0)
