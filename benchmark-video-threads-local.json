@@ -1,0 +1,38 @@
+[
+  {
+    "threads": 1,
+    "seconds": 14.367,
+    "bytes": 1665554,
+    "media": {
+      "duration": 14.8,
+      "width": 1280,
+      "height": 720,
+      "video_codec": "h264",
+      "audio_codec": "aac"
+    }
+  },
+  {
+    "threads": 2,
+    "seconds": 8.933,
+    "bytes": 1665554,
+    "media": {
+      "duration": 14.8,
+      "width": 1280,
+      "height": 720,
+      "video_codec": "h264",
+      "audio_codec": "aac"
+    }
+  },
+  {
+    "threads": 3,
+    "seconds": 8.834,
+    "bytes": 1665554,
+    "media": {
+      "duration": 14.8,
+      "width": 1280,
+      "height": 720,
+      "video_codec": "h264",
+      "audio_codec": "aac"
+    }
+  }
+]

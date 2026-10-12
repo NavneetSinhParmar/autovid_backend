@@ -1,6 +1,7 @@
 import io
 import os
 import unittest
+from dataclasses import replace
 from unittest.mock import Mock, patch
 
 os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
@@ -93,13 +94,15 @@ class UploadValidationTests(unittest.IsolatedAsyncioTestCase):
             "format": {"duration": "300.5"},
             "streams": [{"codec_type": "video", "codec_name": "h264", "width": 1280, "height": 720}],
         }
-        with patch("app.services.media_validator._probe", return_value=probe):
+        from app.services.media_validator import settings as validator_settings
+        with patch("app.services.media_validator._probe", return_value=probe), patch("app.services.media_validator.settings", replace(validator_settings, max_source_video_seconds=1800)):
             media = await validate_video(upload)
         self.assertEqual(media.duration, 300.5)
 
     def test_generated_video_over_one_minute_is_accepted(self):
         result = Mock(returncode=0, stdout='{"format":{"duration":"61"},"streams":[{"codec_type":"video","codec_name":"h264","width":1280,"height":720}]}')
-        with patch("app.services.output_validator.subprocess.run", return_value=result):
+        from app.services.output_validator import settings as output_settings
+        with patch("app.services.output_validator.subprocess.run", return_value=result), patch("app.services.output_validator.settings", replace(output_settings, max_output_video_seconds=900)):
             metadata = validate_generated_video("output.mp4")
         self.assertEqual(metadata["duration"], 61)
 

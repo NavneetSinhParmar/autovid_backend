@@ -1,0 +1,24 @@
+[Unit]
+Description=AutoVid auxiliary worker %i
+After=network-online.target redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=autovid
+Group=autovid
+WorkingDirectory=/var/www/autovid_backend
+EnvironmentFile=/var/www/autovid_backend/.env
+EnvironmentFile=/var/www/autovid_backend/deploy/capacity.env
+ExecStart=/var/www/autovid_backend/.venv/bin/python scripts/run_worker.py %i
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=1800
+SendSIGKILL=no
+UMask=0027
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

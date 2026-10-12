@@ -6,6 +6,9 @@ import shutil
 import uuid
 import hashlib
 import secrets
+import weakref
+from time import sleep as _retry_sleep
+from time import monotonic as _retry_clock
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,8 +18,10 @@ from app.core.errors import AppError
 from app.services.storage import ensure_media_folder, get_media_abs_path
 from app.services.url import build_media_url
 from app.core.settings import settings
+from app.services.render_resources import FileLock
 
 logger = logging.getLogger(__name__)
+_admission_locks = weakref.WeakKeyDictionary()
 
 RENDER_JOB_ROOT = os.getenv("RENDER_JOB_ROOT", "render_jobs")
 RENDER_QUEUE_BACKEND = os.getenv(
@@ -40,10 +45,63 @@ def dispatch_render_task(task_name: str, job_id: str, queue: str) -> None:
         raise ValueError("RENDER_QUEUE_BACKEND must be memory or celery")
 
 
+def resume_local_pending_jobs() -> int:
+    """Restore durable queued jobs after a development server reload."""
+    if RENDER_QUEUE_BACKEND != "memory":
+        return 0
+    from app.services.sync_db import sync_db
+    from app.worker.video_worker import _job_route
+    resumed = 0
+    for job in sync_db.render_jobs.find({"status": "QUEUED"}).sort("created_at", 1):
+        lock = FileLock("job_" + job["job_id"])
+        if not lock.acquire():
+            continue
+        try:
+            task_name, queue = _job_route(job)
+            dispatch_render_task(task_name, job["job_id"], queue)
+            resumed += 1
+        finally:
+            lock.close()
+    logger.info("[LOCAL RENDER] Restored %s queued jobs after startup", resumed)
+    return resumed
+
+
 def _execute_local_task(task_name: str, job_id: str) -> None:
-    from app.worker import video_worker  # Registers the shared worker tasks.
-    from app.services.celery_app import celery_app
-    celery_app.tasks[task_name].apply(args=[job_id], throw=False)
+    from celery.exceptions import Retry
+    from app.services.render_resources import CapacityUnavailable
+    retries = 0
+    capacity_deadline = _retry_clock() + settings.ffmpeg_timeout_seconds
+    try:
+        from app.worker import video_worker  # Registers the shared worker tasks.
+        from app.services.celery_app import celery_app
+        while True:
+            try:
+                # Eager apply otherwise recursively executes retries without
+                # respecting countdown, unlike a real Celery worker.
+                celery_app.tasks[task_name].apply(args=[job_id], throw=True, retries=retries)
+                return
+            except Retry as exc:
+                if isinstance(exc.exc, CapacityUnavailable) and _retry_clock() >= capacity_deadline:
+                    from app.services.sync_db import sync_db
+                    sync_db.render_jobs.update_one(
+                        {"job_id": job_id, "status": "QUEUED"},
+                        {"$set": {"status": "FAILED", "error_code": "RENDER_CAPACITY_TIMEOUT",
+                                  "error": str(exc.exc), "failed_at": _now(), "updated_at": _now()}},
+                    )
+                    logger.error("[LOCAL RENDER] Capacity wait timed out job_id=%s", job_id)
+                    return
+                delay = 1 if isinstance(exc.exc, CapacityUnavailable) else float(exc.when or 1)
+                _retry_sleep(delay)
+                retries += 1
+    except Exception as exc:
+        logger.error("[LOCAL RENDER] FAILED job_id=%s error_type=%s", job_id, type(exc).__name__)
+        from app.services.sync_db import sync_db
+        sync_db.render_jobs.update_one(
+            {"job_id": job_id, "status": "QUEUED"},
+            {"$set": {"status": "FAILED", "error_code": "LOCAL_WORKER_ERROR",
+                      "error": "Local rendering worker could not start; check backend dependencies and logs",
+                      "error_details": {"type": type(exc).__name__}, "failed_at": _now(), "updated_at": _now()}},
+        )
 
 current_render_job_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "current_render_job_id",
@@ -80,6 +138,27 @@ def normalize_render_status(status: str | None) -> str:
 
 
 async def enqueue_celery_render_job(
+    **kwargs,
+) -> dict:
+    # Avoid a thundering herd of OS-lock attempts within one API event loop.
+    loop = asyncio.get_running_loop()
+    local_lock = _admission_locks.setdefault(loop, asyncio.Lock())
+    async with local_lock:
+        return await _admit_render_job(kwargs)
+
+
+async def _admit_render_job(kwargs):
+    # Cross-process admission, shared with campaign expansion.
+    lock = FileLock("queue_admission")
+    while not lock.acquire():
+        await asyncio.sleep(0.01)
+    try:
+        return await _enqueue_celery_render_job(**kwargs)
+    finally:
+        lock.close()
+
+
+async def _enqueue_celery_render_job(
     *,
     kind: str,
     extension: str,
@@ -114,6 +193,10 @@ async def enqueue_celery_render_job(
             existing.pop("access_token_hash", None)
             return existing
 
+    pending = await db.render_jobs.count_documents({"status": {"$in": ["QUEUED", "PROCESSING"]}})
+    if pending >= settings.max_pending_render_jobs:
+        raise AppError(429, "RENDER_QUEUE_FULL", "Render queue admission limit reached; retry later")
+
     job_id = uuid.uuid4().hex
     extension = extension.lstrip(".")
     folder = f"{RENDER_JOB_ROOT}/{job_id}"
@@ -130,6 +213,7 @@ async def enqueue_celery_render_job(
         "kind": kind,
         "job_type": kind,
         "company_id": company_id,
+        "user_id": ((payload.get("context") or {}).get("company") or {}).get("user_id"),
         "campaign_id": campaign_id,
         "customer_id": customer_id,
         "template_id": template_id,
@@ -158,7 +242,17 @@ async def enqueue_celery_render_job(
         "download_url": f"/render-jobs/{job_id}/download",
         "payload": payload or {},
     }
-    await db.render_jobs.insert_one(status.copy())
+    try:
+        await db.render_jobs.insert_one(status.copy())
+    except Exception as exc:
+        from pymongo.errors import DuplicateKeyError
+        if not isinstance(exc, DuplicateKeyError) or not idempotency_key:
+            raise
+        existing = await db.render_jobs.find_one({"company_id": company_id, "idempotency_key": idempotency_key}, {"payload": 0, "access_token_hash": 0})
+        if not existing:
+            raise
+        existing["id"] = str(existing.pop("_id"))
+        return existing
 
     if video_task_id:
         await db.video_tasks.update_one(
@@ -190,11 +284,10 @@ async def enqueue_celery_render_job(
         await db.render_jobs.update_one(
             {"job_id": job_id},
             {"$set": {
-                "status": "FAILED",
+                "status": "QUEUED",
                 "error": error,
                 "error_code": "QUEUE_UNAVAILABLE",
                 "error_details": {"type": exc.__class__.__name__, "message": str(exc)},
-                "failed_at": failed_at,
                 "updated_at": failed_at,
             }},
         )
@@ -202,7 +295,7 @@ async def enqueue_celery_render_job(
             await db.video_tasks.update_one(
                 {"_id": ObjectId(video_task_id)},
                 {"$set": {
-                    "status": "FAILED",
+                    "status": "QUEUED",
                     "error": error,
                     "error_details": {"type": exc.__class__.__name__, "message": str(exc)},
                     "updated_at": failed_at,

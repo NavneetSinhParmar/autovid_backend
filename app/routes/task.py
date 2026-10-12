@@ -95,6 +95,9 @@ async def generate_video(
             },
         )
     except Exception as exc:
+        from app.core.errors import AppError
+        if isinstance(exc, AppError):
+            raise
         raise HTTPException(503, f"Render queue unavailable: {exc}") from exc
 
     return {

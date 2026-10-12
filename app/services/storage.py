@@ -102,6 +102,9 @@ async def save_upload_file(file, company_id: str, folder_path: str | None = None
 
 
 class StorageService(ABC):
+    def save_cached_file(self, source: str, folder_path: str, filename: str) -> str:
+        raise NotImplementedError("Storage adapter must support streaming file uploads")
+
     def save_cached(self, content: bytes, folder_path: str, filename: str) -> str:
         return self.save(content, folder_path, filename)
 
@@ -131,6 +134,31 @@ class StorageService(ABC):
 
 
 class LocalStorageService(StorageService):
+    def save_cached_file(self, source: str, folder_path: str, filename: str) -> str:
+        folder = ensure_media_folder(folder_path)
+        digest = hashlib.sha256()
+        with open(source, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        relative = f"{folder}/{digest.hexdigest()}{Path(filename).suffix.lower()}"
+        target = get_media_abs_path(relative)
+        if os.path.isfile(target):
+            return relative
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=os.path.dirname(target), delete=False) as handle:
+                temporary = handle.name
+                with open(source, "rb") as input_file:
+                    shutil.copyfileobj(input_file, handle, 1024 * 1024)
+            try:
+                os.link(temporary, target)
+            except FileExistsError:
+                pass
+        finally:
+            if temporary:
+                Path(temporary).unlink(missing_ok=True)
+        return relative
+
     def save_cached(self, content: bytes, folder_path: str, filename: str) -> str:
         folder = ensure_media_folder(folder_path)
         suffix = Path(filename).suffix.lower() or ".bin"

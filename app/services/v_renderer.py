@@ -1,5 +1,6 @@
 import os
 import subprocess
+from app.services.video_renderer import _run_with_resolved_exec
 import shlex
 from typing import Dict, Any, List
 import uuid 
@@ -266,7 +267,7 @@ def render_preview(template, output_path):
     if audio_idx is not None: cmd += ["-map", f"{audio_idx}:a"]
     cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", "30", "-t", str(duration), output_path]
 
-    subprocess.run(cmd, check=True)
+    _run_with_resolved_exec(cmd, check=True)
 
     
 def render_video(task_id: str):
@@ -309,7 +310,7 @@ def render_video(task_id: str):
     ]
 
     logger.debug("Running legacy FFmpeg renderer")
-    subprocess.run(cmd, check=True)
+    _run_with_resolved_exec(cmd, check=True)
 
     return output_path
 

@@ -90,3 +90,7 @@ encore.gen.go
 encore.gen.cue
 /.encore
 /encore.gen
+.test-deps/
+.render_locks/
+deploy/capacity.env
+test-results.txt

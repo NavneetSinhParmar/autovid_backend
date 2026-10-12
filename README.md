@@ -36,7 +36,7 @@ Every render uses `media/render_jobs/{job_id}/temp` and `media/render_jobs/{job_
 
 `app/services/media_validator.py` is the shared validation boundary.
 
-- Images: JPG/JPEG, PNG, WebP; decoded with Pillow; configurable byte and dimension limits.
+- Images: JPG/JPEG, PNG, WebP decoded with Pillow; self-contained SVG is converted to PNG with CairoSVG and native Cairo. External SVG resources are rejected.
 - Video: MP4, MOV, WebM; FFprobe verifies stream, codec, resolution, corruption, and media duration.
 - Audio: MP3, WAV, M4A, AAC, OGG; FFprobe verifies stream and duration.
 - Stable errors include `VIDEO_TOO_LONG`, `FILE_TOO_LARGE`, `INVALID_MEDIA_TYPE`, `INVALID_VIDEO`, `UNSUPPORTED_FORMAT`, and `IMAGE_DIMENSIONS_EXCEEDED`.
@@ -92,10 +92,13 @@ Copy `.env.example` into your local environment and provide real values through 
 Important capacity settings:
 
 ```text
-VIDEO_WORKER_CONCURRENCY=100
+CELERY_RENDER_CONCURRENCY=2
+MAX_CONCURRENT_VIDEO_RENDERS=2
 IMAGE_WORKER_CONCURRENCY=4
 TTS_WORKER_CONCURRENCY=2
-FFMPEG_THREADS=2
+FFMPEG_THREADS=1
+FFMPEG_FILTER_THREADS=1
+CELERY_WORKER_PREFETCH_MULTIPLIER=1
 FFMPEG_PRESET=veryfast
 FFMPEG_CRF=22
 MAX_RENDER_RETRIES=2
@@ -112,9 +115,10 @@ comparisons, concurrent benchmarks and the full-resolution composition opt-out.
 For single-process local development, set `APP_ENV=development` and
 `RENDER_QUEUE_BACKEND=memory`. Render jobs run in separate bounded background pools with
 MongoDB status and secured downloads, without Redis/Celery workers. Production
-uses `RENDER_QUEUE_BACKEND=celery` and the workers below. Image/video renders and
-source videos have no duration ceiling or elapsed render timeout. See
-[RENDERING.md](../RENDERING.md) for the current render contract.
+uses `RENDER_QUEUE_BACKEND=celery` and the workers below. Configurable source/output
+duration ceilings and FFmpeg elapsed timeouts now apply. Older rendering and
+concurrency documents may describe the previous unlimited contract; the current
+[deployment and scaling guide](deploy/README.md) takes precedence.
 
 For an existing local database containing duplicate user email/username records,
 `APP_ENV=development` and `ALLOW_LOCAL_LEGACY_USER_INDEXES=true` allow startup
@@ -135,14 +139,22 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 Run workers as separate processes so each queue has independent capacity:
 
 ```bash
-celery -A app.services.celery_app.celery_app worker -Q render_video --concurrency=100 --loglevel=info
-celery -A app.services.celery_app.celery_app worker -Q render_image --concurrency=4 --loglevel=info
-celery -A app.services.celery_app.celery_app worker -Q tts --concurrency=2 --loglevel=info
-celery -A app.services.celery_app.celery_app worker -Q campaigns,maintenance --concurrency=1 --loglevel=info
-celery -A app.services.celery_app.celery_app beat --loglevel=info
+python scripts/run_worker.py render_video
+python scripts/run_worker.py render_image
+python scripts/run_worker.py tts
+python scripts/run_worker.py campaigns,maintenance
+python scripts/run_worker.py beat
 ```
 
 Equivalent process definitions are in `Procfile`.
+
+The existing `app.worker.video_worker.celery_app` entry point and `render_video`
+queue are preserved. Workers share a host-wide FFmpeg budget with image and TTS
+encoding; extra jobs wait and low-memory admission retries without claiming a job.
+The supported deployment is one Linux host with one shared lock directory, not
+independent hosts. Ten is a configurable benchmark target, not a safe default.
+See [audit](CONCURRENCY_AUDIT.md), [exact Linux deployment/restart commands and
+load testing](deploy/README.md), and [validation results](VALIDATION_RESULTS.md).
 
 ## Monitoring
 

@@ -16,6 +16,7 @@ class ConcurrentMediaTests(unittest.IsolatedAsyncioTestCase):
     async def test_video_uses_speech_queue_only_when_voiceover_is_present(self):
         db = Mock()
         db.render_jobs.insert_one = AsyncMock()
+        db.render_jobs.count_documents = AsyncMock(return_value=0)
         for voice in (False, True):
             with self.subTest(voice=voice), patch("app.db.connection.db", db), \
                  patch.object(render_queue, "ensure_media_folder"), \
@@ -65,6 +66,7 @@ class ConcurrentMediaTests(unittest.IsolatedAsyncioTestCase):
 
         db = Mock()
         db.render_jobs.insert_one = AsyncMock()
+        db.render_jobs.count_documents = AsyncMock(return_value=0)
         try:
             with patch.object(render_queue, "RENDER_QUEUE_BACKEND", "memory"), \
                  patch.object(render_queue, "_local_executors", pools), \

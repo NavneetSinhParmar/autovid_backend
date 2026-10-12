@@ -3,8 +3,9 @@ import hashlib
 import hmac
 import mimetypes
 import re
+import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse
 
@@ -62,15 +63,35 @@ async def list_render_jobs(
         ]
     total = await db.render_jobs.count_documents(query)
     sort_field, sort_direction = pagination.sort({"created_at", "updated_at", "status", "progress", "render_duration"})
-    docs = await db.render_jobs.find(query, {"payload": 0, "output_path": 0}).sort(sort_field, sort_direction).skip(pagination.skip).limit(pagination.limit).to_list(pagination.limit)
+    docs = await db.render_jobs.find(query, {"payload": 0, "output_path": 0, "access_token_hash": 0}).sort(sort_field, sort_direction).skip(pagination.skip).limit(pagination.limit).to_list(pagination.limit)
     for doc in docs:
         doc["id"] = str(doc.pop("_id"))
     return jsonable_encoder(page_result(docs, total, pagination))
 
 
 @router.get("/{job_id}")
-async def render_job_status(job_id: str, access_token: str | None = None, user=Depends(get_optional_current_user)):
+async def render_job_status(job_id: str, request: Request, access_token: str | None = None,
+                            wait_seconds: float = Query(0, ge=0, le=15), wait_for_progress: bool = False, user=Depends(get_optional_current_user)):
     job = await _owned_job(job_id, user, access_token)
+    # Optional long poll: one HTTP request returns immediately on completion.
+    # Authorization runs before waiting; ordinary callers keep the existing API.
+    deadline = asyncio.get_running_loop().time() + wait_seconds
+    initial_status = job["status"]
+    initial_progress = float(job.get("progress") or 0)
+    initial_reason = job.get("waiting_reason")
+    while job["status"] in {"QUEUED", "PROCESSING"}:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0 or await request.is_disconnected():
+            break
+        await asyncio.sleep(min(0.2, remaining))
+        latest = await db.render_jobs.find_one({"job_id": job_id, "company_id": job.get("company_id")}, {"payload": 0, "access_token_hash": 0, "output_path": 0})
+        if not latest:
+            raise HTTPException(404, "Render job not found")
+        latest["id"] = str(latest.pop("_id"))
+        latest["status"] = str(latest.get("status") or "QUEUED").upper()
+        job = latest
+        if wait_for_progress and (job["status"] != initial_status or float(job.get("progress") or 0) >= initial_progress + 5 or job.get("waiting_reason") != initial_reason):
+            break
     job.pop("output_path", None)
     return jsonable_encoder(job)
 

@@ -14,8 +14,8 @@ from app.services.video_renderer import render_preview
 from app.services.video_renderer import render_image_preview
 from app.services.output_validator import validate_generated_video
 from app.core.settings import settings
+from app.services.render_resources import FileLock, isolated_job
 from pymongo import ReturnDocument
-from app.services.kokoro_tts import synthesize_and_store_media
 from app.utils.placeholders import replace_placeholders
 import asyncio
 import csv
@@ -24,6 +24,12 @@ import threading
 from openpyxl import load_workbook
 
 logger = logging.getLogger(__name__)
+
+
+async def synthesize_and_store_media(**kwargs):
+    # Keep Torch/Kokoro out of video/image/campaign worker startup and prefork.
+    from app.services.kokoro_tts import synthesize_and_store_media as synthesize
+    return await synthesize(**kwargs)
 
 
 def _now() -> datetime:
@@ -78,7 +84,7 @@ def _campaign_transition(job: dict, previous: str, current: str) -> None:
     if campaign:
         finished = int(campaign.get("completed", 0)) + int(campaign.get("failed", 0))
         total = max(1, int(campaign.get("total", 0)))
-        status = "COMPLETED" if finished >= total else "PROCESSING"
+        status = "COMPLETED" if finished >= total and not campaign.get("expansion_pending") else "PROCESSING"
         sync_db.campaigns.update_one(
             {"_id": campaign["_id"]},
             {"$set": {"progress": round(finished * 100 / total, 2), "status": status, "updated_at": _now()}},
@@ -102,7 +108,9 @@ def _safe_cleanup_tmp(tmp_folder: str | None) -> None:
     bind=True,
     name="app.worker.video_worker.render_video_task",
     autoretry_for=(),
+    max_retries=None,
 )
+@isolated_job(reserve_ffmpeg=True)
 def render_video_task(self, job_id: str):
     job = sync_db.render_jobs.find_one_and_update(
         {"job_id": job_id, "status": "QUEUED"},
@@ -144,6 +152,7 @@ def render_video_task(self, job_id: str):
     })
 
     heartbeat = _start_job_heartbeat(job_id)
+    logger.info("[VIDEO JOB] START job_id=%s", job_id)
     try:
         payload = job.get("payload") or {}
         template = deepcopy(payload.get("template") or {})
@@ -174,7 +183,7 @@ def render_video_task(self, job_id: str):
             "error": None,
             "error_details": None,
         })
-        logger.info("[celery_render] job_id=%s completed", job_id)
+        logger.info("[VIDEO JOB] COMPLETED job_id=%s elapsed=%.2fs", job_id, (completed - started).total_seconds())
         _campaign_transition(job, "PROCESSING", "COMPLETED")
         return {"job_id": job_id, "status": "COMPLETED", "output_url": output_url}
     except Exception as exc:
@@ -185,6 +194,7 @@ def render_video_task(self, job_id: str):
         retry_count = int(job.get("retry_count") or 0) + 1
         if retry_count <= settings.max_render_retries:
             _set_job(job_id, {"status": "QUEUED", "retry_count": retry_count, "error": details})
+            _set_task(video_task_id, {"status": "QUEUED", "retry_count": retry_count})
             _campaign_transition(job, "PROCESSING", "QUEUED")
             raise self.retry(exc=exc, countdown=min(60, 2 ** retry_count))
         _set_job(job_id, {
@@ -208,6 +218,7 @@ def render_video_task(self, job_id: str):
 
 
 @celery_app.task(bind=True, name="app.worker.video_worker.render_image_task", max_retries=None)
+@isolated_job(reserve_ffmpeg=True)
 def render_image_task(self, job_id: str):
     job = sync_db.render_jobs.find_one_and_update(
         {"job_id": job_id, "status": "QUEUED"},
@@ -218,6 +229,7 @@ def render_image_task(self, job_id: str):
         current = sync_db.render_jobs.find_one({"job_id": job_id})
         return {"job_id": job_id, "status": current.get("status") if current else "MISSING"}
     started = job["started_at"]
+    logger.info("[IMAGE JOB] START job_id=%s", job_id)
     _campaign_transition(job, "QUEUED", "PROCESSING")
     heartbeat = _start_job_heartbeat(job_id)
     token_job = current_render_job_id.set(job_id)
@@ -243,6 +255,7 @@ def render_image_task(self, job_id: str):
             "render_duration": (completed - started).total_seconds(), "error": None,
         })
         _campaign_transition(job, "PROCESSING", "COMPLETED")
+        logger.info("[IMAGE JOB] COMPLETED job_id=%s elapsed=%.2fs", job_id, (completed - started).total_seconds())
         return {"job_id": job_id, "status": "COMPLETED", "output_url": output_url}
     except Exception as exc:
         details = {"type": exc.__class__.__name__, "message": str(exc)}
@@ -268,34 +281,89 @@ def recover_stuck_jobs():
     requeued = 0
     failed = 0
     for job in sync_db.render_jobs.find({"status": "PROCESSING", "updated_at": {"$lt": cutoff}}):
-        retry_count = int(job.get("retry_count") or 0) + 1
-        if retry_count > settings.max_render_retries:
-            sync_db.render_jobs.update_one(
-                {"_id": job["_id"], "status": "PROCESSING"},
-                {"$set": {"status": "FAILED", "retry_count": retry_count, "failed_at": _now(), "updated_at": _now(), "error": {"code": "WORKER_TIMEOUT", "message": "Worker did not update the job before its timeout"}}},
-            )
-            _campaign_transition(job, "PROCESSING", "FAILED")
-            failed += 1
+        lock = FileLock("job_" + job["job_id"])
+        if not lock.acquire():
+            continue  # Live worker or orphaned FFmpeg still owns its files.
+        try:
+            result = _recover_processing_job(job, cutoff)
+            requeued += result == "QUEUED"
+            failed += result == "FAILED"
+        finally:
+            lock.close()
+    # MongoDB is the durable source of truth for publication interrupted by a crash.
+    # Re-publication is at-least-once; job locks and atomic claims deduplicate work.
+    for job in sync_db.render_jobs.find({"status": "QUEUED", "updated_at": {"$lt": cutoff}}).limit(100):
+        lock = FileLock("job_" + job["job_id"])
+        if not lock.acquire():
             continue
+        try:
+            result = sync_db.render_jobs.update_one(
+                {"_id": job["_id"], "status": "QUEUED", "updated_at": job["updated_at"]},
+                {"$set": {"updated_at": _now()}},
+            )
+            if result.modified_count:
+                task_name, queue = _job_route(job)
+                dispatch_render_task(task_name, job["job_id"], queue)
+                requeued += 1
+        finally:
+            lock.close()
+    for campaign in sync_db.campaigns.find({"$or": [{"status": "QUEUED"}, {"status": "PROCESSING", "expansion_pending": True}], "updated_at": {"$lt": cutoff}}).limit(20):
+        campaign_id = str(campaign["_id"])
+        lock = FileLock("job_" + campaign_id)
+        if not lock.acquire():
+            continue
+        try:
+            result = sync_db.campaigns.update_one(
+                {"_id": campaign["_id"], "updated_at": campaign["updated_at"]},
+                {"$set": {"updated_at": _now()}},
+            )
+            if result.modified_count:
+                celery_app.send_task("app.worker.video_worker.expand_campaign_task", args=[campaign_id], queue="campaigns")
+        finally:
+            lock.close()
+    return {"requeued": requeued, "failed": failed}
+
+
+def _job_route(job):
+    if job.get("job_type") == "tts":
+        return "app.worker.video_worker.generate_tts_task", "tts"
+    if (job.get("payload") or {}).get("dynamic_tts"):
+        return "app.worker.video_worker.prepare_render_tts_task", "tts"
+    if str(job.get("output_relative_path", "")).lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+        return "app.worker.video_worker.render_image_task", "render_image"
+    return "app.worker.video_worker.render_video_task", "render_video"
+
+
+def _recover_processing_job(job, cutoff):
+    # Called while the execution lock is held. Recheck heartbeat in the CAS.
+    retry_count = int(job.get("retry_count") or 0) + 1
+    if retry_count > settings.max_render_retries:
         result = sync_db.render_jobs.update_one(
-            {"_id": job["_id"], "status": "PROCESSING"},
-            {"$set": {"status": "QUEUED", "retry_count": retry_count, "updated_at": _now()}},
+            {"_id": job["_id"], "status": "PROCESSING", "updated_at": {"$lt": cutoff}},
+            {"$set": {"status": "FAILED", "retry_count": retry_count, "failed_at": _now(), "updated_at": _now(), "error": {"code": "WORKER_TIMEOUT", "message": "Worker did not update the job before its timeout"}}},
         )
         if not result.modified_count:
-            continue
-        payload = job.get("payload") or {}
-        if job.get("job_type") == "tts":
-            task_name, queue = "app.worker.video_worker.generate_tts_task", "tts"
-        elif payload.get("dynamic_tts"):
-            task_name, queue = "app.worker.video_worker.prepare_render_tts_task", "tts"
-        elif str(job.get("output_relative_path", "")).lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
-            task_name, queue = "app.worker.video_worker.render_image_task", "render_image"
-        else:
-            task_name, queue = "app.worker.video_worker.render_video_task", "render_video"
-        celery_app.send_task(task_name, args=[job["job_id"]], queue=queue)
-        _campaign_transition(job, "PROCESSING", "QUEUED")
-        requeued += 1
-    return {"requeued": requeued, "failed": failed}
+            return None
+        _campaign_transition(job, "PROCESSING", "FAILED")
+        return "FAILED"
+    result = sync_db.render_jobs.update_one(
+        {"_id": job["_id"], "status": "PROCESSING", "updated_at": {"$lt": cutoff}},
+        {"$set": {"status": "QUEUED", "retry_count": retry_count, "updated_at": _now()}},
+    )
+    if not result.modified_count:
+        return None
+    payload = job.get("payload") or {}
+    if job.get("job_type") == "tts":
+        task_name, queue = "app.worker.video_worker.generate_tts_task", "tts"
+    elif payload.get("dynamic_tts"):
+        task_name, queue = "app.worker.video_worker.prepare_render_tts_task", "tts"
+    elif str(job.get("output_relative_path", "")).lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+        task_name, queue = "app.worker.video_worker.render_image_task", "render_image"
+    else:
+        task_name, queue = "app.worker.video_worker.render_video_task", "render_video"
+    dispatch_render_task(task_name, job["job_id"], queue)
+    _campaign_transition(job, "PROCESSING", "QUEUED")
+    return "QUEUED"
 
 
 def _campaign_customer_ids(campaign: dict) -> list[str]:
@@ -330,13 +398,14 @@ def _campaign_customer_ids(campaign: dict) -> list[str]:
     return customer_ids
 
 
-@celery_app.task(name="app.worker.video_worker.expand_campaign_task")
-def expand_campaign_task(campaign_id: str):
+@celery_app.task(bind=True, name="app.worker.video_worker.expand_campaign_task", max_retries=None)
+@isolated_job()
+def expand_campaign_task(self, campaign_id: str):
     if not ObjectId.is_valid(campaign_id):
         raise ValueError("Invalid campaign id")
     campaign = sync_db.campaigns.find_one_and_update(
-        {"_id": ObjectId(campaign_id), "status": "QUEUED"},
-        {"$set": {"status": "PROCESSING", "updated_at": _now()}},
+        {"_id": ObjectId(campaign_id), "status": {"$in": ["QUEUED", "PROCESSING"]}},
+        {"$set": {"status": "PROCESSING", "expansion_pending": True, "updated_at": _now()}},
         return_document=ReturnDocument.AFTER,
     )
     if not campaign:
@@ -344,80 +413,69 @@ def expand_campaign_task(campaign_id: str):
     template = sync_db.templates.find_one({"_id": ObjectId(campaign["template_id"]), "company_id": campaign["company_id"]})
     company = sync_db.companies.find_one({"_id": ObjectId(campaign["company_id"])})
     if not template or not company:
-        sync_db.campaigns.update_one({"_id": campaign["_id"]}, {"$set": {"status": "FAILED", "error": "Template or company not found"}})
+        sync_db.campaigns.update_one({"_id": campaign["_id"]}, {"$set": {"status": "FAILED", "expansion_pending": False, "error": "Template or company not found"}})
         return {"campaign_id": campaign_id, "status": "FAILED"}
     try:
         customer_ids = _campaign_customer_ids(campaign)
     except Exception as exc:
-        sync_db.campaigns.update_one(
-            {"_id": campaign["_id"]},
-            {"$set": {"status": "FAILED", "error": str(exc), "updated_at": _now()}},
-        )
+        sync_db.campaigns.update_one({"_id": campaign["_id"]}, {"$set": {"status": "FAILED", "expansion_pending": False, "error": str(exc), "updated_at": _now()}})
         return {"campaign_id": campaign_id, "status": "FAILED"}
-    now = _now()
-    is_image = str(template.get("type", "video")).lower() in {"img", "image"}
     created = 0
-    task_dispatches: list[tuple[str, str, str]] = []
-    for customer_id in customer_ids:
-        customer = sync_db.customers.find_one({
-            "_id": ObjectId(customer_id),
-            "linked_company_id": {"$in": [campaign["company_id"], ObjectId(campaign["company_id"])]},
-        })
+    is_image = str(template.get("type", "video")).lower() in {"img", "image"}
+    for customer_id in dict.fromkeys(customer_ids):
+        key = f"campaign:{campaign_id}:customer:{customer_id}"
+        if sync_db.render_jobs.find_one({"company_id": campaign["company_id"], "idempotency_key": key}):
+            continue
+        customer = sync_db.customers.find_one({"_id": ObjectId(customer_id), "linked_company_id": {"$in": [campaign["company_id"], ObjectId(campaign["company_id"])]}})
         if not customer:
             continue
-        job_id = uuid.uuid4().hex
-        folder = f"render_jobs/{job_id}"
-        temp_folder = f"{folder}/temp"
-        output_folder = f"{folder}/output"
-        ensure_media_folder(temp_folder)
-        ensure_media_folder(output_folder)
-        extension = "jpg" if is_image else "mp4"
-        output_relative = f"{output_folder}/output.{extension}"
-        customer_context = {k: (str(v) if v is not None else "") for k, v in customer.items() if k != "_id"}
-        customer_context["id"] = customer_id
-        company_context = {k: (str(v) if v is not None else "") for k, v in company.items() if k != "_id"}
-        company_context["id"] = campaign["company_id"]
-        document = {
-            "job_id": job_id, "company_id": campaign["company_id"], "campaign_id": campaign_id,
-            "customer_id": customer_id, "template_id": campaign["template_id"],
-            "job_type": "campaign_image" if is_image else "campaign_video", "kind": "campaign_image" if is_image else "campaign_video",
-            "status": "QUEUED", "progress": 0, "retry_count": 0,
-            "queued_at": now, "created_at": now, "updated_at": now,
-            "started_at": None, "completed_at": None, "failed_at": None,
-            "render_duration": None, "output_url": None, "error": None,
-            "status_url": f"/render-jobs/{job_id}", "download_url": f"/render-jobs/{job_id}/download",
-            "folder": folder, "tmp_folder": temp_folder, "output_relative_path": output_relative,
-            "payload": {"template": template, "context": {"customer": customer_context, "company": company_context}},
-            "idempotency_key": f"campaign:{campaign_id}:customer:{customer_id}",
-        }
-        try:
+        with FileLock("queue_admission"):
+            count = sync_db.render_jobs.count_documents({"status": {"$in": ["QUEUED", "PROCESSING"]}})
+            if count >= settings.max_pending_render_jobs:
+                raise self.retry(countdown=10, max_retries=None)
+            job_id = uuid.uuid4().hex
+            folder = f"render_jobs/{job_id}"
+            temp_folder = f"{folder}/temp"
+            extension = "jpg" if is_image else "mp4"
+            output_relative = f"{folder}/output/output.{extension}"
+            ensure_media_folder(temp_folder)
+            ensure_media_folder(f"{folder}/output")
+            context = {}
+            for name, record, record_id in [("customer", customer, customer_id), ("company", company, campaign["company_id"])]:
+                context[name] = {k: (str(v) if v is not None else "") for k, v in record.items() if k != "_id"}
+                context[name]["id"] = record_id
+            now = _now()
+            document = {
+                "job_id": job_id, "company_id": campaign["company_id"], "user_id": str(company.get("user_id") or ""),
+                "campaign_id": campaign_id, "customer_id": customer_id, "template_id": campaign["template_id"],
+                "job_type": "campaign_image" if is_image else "campaign_video", "kind": "campaign_image" if is_image else "campaign_video",
+                "status": "QUEUED", "progress": 0, "retry_count": 0, "queued_at": now, "created_at": now, "updated_at": now,
+                "started_at": None, "completed_at": None, "failed_at": None, "render_duration": None, "output_url": None, "error": None,
+                "status_url": f"/render-jobs/{job_id}", "download_url": f"/render-jobs/{job_id}/download",
+                "folder": folder, "tmp_folder": temp_folder, "output_relative_path": output_relative,
+                "payload": {"template": template, "context": context}, "idempotency_key": key,
+            }
             sync_db.render_jobs.insert_one(document)
-        except Exception:
-            continue
-        task_name = "app.worker.video_worker.render_image_task" if is_image else "app.worker.video_worker.render_video_task"
-        queue = "render_image" if is_image else "render_video"
-        task_dispatches.append((task_name, queue, job_id))
-        created += 1
-    sync_db.campaigns.update_one(
-        {"_id": campaign["_id"]},
-        {"$set": {"total": created, "queued": created, "processing": 0, "completed": 0, "failed": 0, "progress": 0.0, "updated_at": _now(), "status": "PROCESSING" if created else "FAILED"}},
-    )
-    for task_name, queue, job_id in task_dispatches:
+        sync_db.campaigns.update_one({"_id": campaign["_id"]}, {"$inc": {"total": 1, "queued": 1}, "$set": {"updated_at": _now()}})
         try:
-            celery_app.send_task(task_name, args=[job_id], queue=queue)
-        except Exception as exc:
-            sync_db.render_jobs.update_one(
-                {"job_id": job_id, "status": "QUEUED"},
-                {"$set": {"status": "FAILED", "failed_at": _now(), "updated_at": _now(), "error": {"code": "QUEUE_UNAVAILABLE", "message": str(exc)}}},
-            )
-            sync_db.campaigns.update_one(
-                {"_id": campaign["_id"]},
-                {"$inc": {"queued": -1, "failed": 1}, "$set": {"updated_at": _now()}},
-            )
+            task_name, queue = _job_route(document)
+            dispatch_render_task(task_name, job_id, queue)
+        except Exception:
+            logger.exception("Campaign publication deferred for job %s", job_id)
+            # Reconciler republishes the durable QUEUED record.
+        created += 1
+    current = sync_db.campaigns.find_one({"_id": campaign["_id"]}) or {}
+    total = int(current.get("total") or 0)
+    finished = int(current.get("completed") or 0) + int(current.get("failed") or 0)
+    sync_db.campaigns.update_one({"_id": campaign["_id"]}, {"$set": {
+        "expansion_pending": False, "updated_at": _now(),
+        "status": "COMPLETED" if total and finished >= total else "PROCESSING" if total else "FAILED",
+    }})
     return {"campaign_id": campaign_id, "jobs_created": created}
 
 
-@celery_app.task(bind=True, name="app.worker.video_worker.generate_tts_task")
+@celery_app.task(bind=True, name="app.worker.video_worker.generate_tts_task", max_retries=None)
+@isolated_job()
 def generate_tts_task(self, job_id: str):
     job = sync_db.render_jobs.find_one_and_update(
         {"job_id": job_id, "status": "QUEUED"},
@@ -456,12 +514,15 @@ def generate_tts_task(self, job_id: str):
         raise
 
 
-@celery_app.task(bind=True, name="app.worker.video_worker.prepare_render_tts_task")
+@celery_app.task(bind=True, name="app.worker.video_worker.prepare_render_tts_task", max_retries=None)
+@isolated_job()
 def prepare_render_tts_task(self, job_id: str):
     job = sync_db.render_jobs.find_one({"job_id": job_id, "status": "QUEUED"})
     if not job:
         return {"job_id": job_id, "status": "IGNORED"}
     payload = deepcopy(job.get("payload") or {})
+    if not payload.get("dynamic_tts"):
+        return {"job_id": job_id, "status": "QUEUED", "tts_prepared": True}
     template = payload.get("template") or {}
     template_json = template.get("template_json") or {}
     track_map = (template_json.get("design") or {}).get("trackItemsMap") or {}

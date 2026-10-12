@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from PIL import Image
 
@@ -13,6 +14,45 @@ from app.services.render_queue import current_render_temp_dir
 
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg required")
 class VideoPipelineTests(unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import patch
+        locks = tempfile.TemporaryDirectory()
+        self.addCleanup(locks.cleanup)
+        config = patch.dict("os.environ", {"RENDER_LOCK_DIR": locks.name})
+        config.start()
+        self.addCleanup(config.stop)
+
+    def test_simultaneous_image_and_video_have_separate_outputs(self):
+        from unittest.mock import patch
+        from app.services.video_renderer import render_image_preview
+        from app.services import render_resources
+        from dataclasses import replace
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root)
+            template = {"duration": 1, "template_json": {"design": {
+                "size": {"width": 64, "height": 36}, "trackItemIds": [], "trackItemsMap": {},
+            }}}
+            for name in ("image", "video"):
+                (folder / name).mkdir()
+            def image():
+                token = current_render_temp_dir.set(str(folder / "image"))
+                try:
+                    render_image_preview(template["template_json"], {}, {}, str(folder / "image" / "output.jpg"))
+                finally:
+                    current_render_temp_dir.reset(token)
+            def video():
+                token = current_render_temp_dir.set(str(folder / "video"))
+                try:
+                    render_preview(template, {}, str(folder / "video" / "output.mp4"))
+                finally:
+                    current_render_temp_dir.reset(token)
+            with patch.dict("os.environ", {"RENDER_LOCK_DIR": str(folder / "locks")}), patch.object(render_resources, "available_memory_mb", return_value=100000), patch.object(render_resources, "settings", replace(render_resources.settings, max_concurrent_video_renders=2)), ThreadPoolExecutor(2) as pool:
+                futures = [pool.submit(image), pool.submit(video)]
+                for future in futures:
+                    future.result(timeout=30)
+            self.assertTrue((folder / "image" / "output.jpg").is_file())
+            self.assertEqual(validate_generated_video(str(folder / "video" / "output.mp4"))["duration"], 1)
+
     def test_single_still_frame_repeats_only_during_its_display_interval(self):
         with tempfile.TemporaryDirectory() as root:
             folder = Path(root)

@@ -48,6 +48,8 @@ async def bootstrap_superadmin() -> None:
 async def lifespan(_: FastAPI):
     await ensure_indexes()
     await bootstrap_superadmin()
+    from app.services.render_queue import resume_local_pending_jobs
+    await asyncio.to_thread(resume_local_pending_jobs)
     yield
 
 

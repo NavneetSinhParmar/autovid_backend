@@ -1,0 +1,14 @@
+{
+  "scope": "local image renderer, not upload/API/queue time",
+  "fixture": "1280x720 JPEG with PNG logo and text",
+  "renders": 5,
+  "elapsed_seconds": [
+    0.08926100000098813,
+    0.06819700000050943,
+    0.059217999998509185,
+    0.06387209999957122,
+    0.06224610000208486
+  ],
+  "average_seconds": 0.06855884000033256,
+  "maximum_seconds": 0.08926100000098813
+}

@@ -1,6 +1,7 @@
 import os
 
 from celery import Celery
+from app.core.settings import settings
 
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -13,7 +14,7 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-VIDEO_WORKER_CONCURRENCY = _env_int("VIDEO_WORKER_CONCURRENCY", 100)
+VIDEO_WORKER_CONCURRENCY = settings.video_worker_concurrency
 
 celery_app = Celery(
     "autovid_render_worker",
@@ -25,7 +26,11 @@ celery_app = Celery(
 celery_app.conf.update(
     task_acks_late=True,
     task_reject_on_worker_lost=True,
-    worker_prefetch_multiplier=1,
+    worker_prefetch_multiplier=_env_int("CELERY_WORKER_PREFETCH_MULTIPLIER", 1),
+    worker_max_memory_per_child=settings.worker_max_memory_kb,
+    worker_max_tasks_per_child=_env_int("CELERY_WORKER_MAX_TASKS_PER_CHILD", 25),
+    worker_cancel_long_running_tasks_on_connection_loss=True,
+    task_publish_retry=True,
     task_track_started=True,
     worker_concurrency=VIDEO_WORKER_CONCURRENCY,
     task_default_queue="render_video",

@@ -1,0 +1,58 @@
+{
+  "platform": "Windows-10-10.0.26200-SP0",
+  "cpu_logical": 12,
+  "ram_mb": 16108.4921875,
+  "template": "synthetic 720p PNG overlays, text and sine-wave audio",
+  "seconds": 15.0,
+  "stages": [
+    {
+      "target": 2,
+      "completed": 2,
+      "failed": 0,
+      "average_render_seconds": 2.395231999999851,
+      "maximum_render_seconds": 2.8920042000008834,
+      "average_queue_wait_seconds": 9.99999429041054e-07,
+      "wall_seconds": 3.1563471999998,
+      "actual_peak_ffmpeg_processes": 2,
+      "resources": {
+        "samples": 21,
+        "peak_host_ffmpeg_count": 2,
+        "process_scope": "benchmark child PIDs",
+        "process_visibility_restricted": false,
+        "peak_ffmpeg_rss_mb": 194.87890625,
+        "average_cpu_percent": 23.876190476190473,
+        "peak_cpu_percent": 47.2,
+        "peak_host_used_mb": 11840.0546875,
+        "minimum_available_mb": 4268.4375,
+        "peak_swap_used_mb": 783.84765625
+      },
+      "results": [
+        {
+          "completed": true,
+          "render_seconds": 2.8920042000008834,
+          "queue_wait_seconds": 7.999988156370819e-07,
+          "output": {
+            "duration": 15.0,
+            "width": 1280,
+            "height": 720,
+            "video_codec": "h264",
+            "audio_codec": "aac"
+          }
+        },
+        {
+          "completed": true,
+          "render_seconds": 1.8984597999988182,
+          "queue_wait_seconds": 1.2000000424450263e-06,
+          "output": {
+            "duration": 15.0,
+            "width": 1280,
+            "height": 720,
+            "video_codec": "h264",
+            "audio_codec": "aac"
+          }
+        }
+      ],
+      "artifact_root": "C:\\project\\video-img-genrated\\backend\\media\\concurrency_benchmarks\\5be37e7ed8584619a6028781f73d78f2\\2"
+    }
+  ]
+}

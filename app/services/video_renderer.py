@@ -10,6 +10,11 @@ import requests
 import hashlib 
 import shlex
 import logging
+import math
+import tempfile
+import time
+from app.core.settings import settings
+from app.services.ffmpeg_process import run_ffmpeg
 from copy import deepcopy
 from bson import ObjectId 
 from app.db.connection import db 
@@ -26,7 +31,7 @@ DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 MEDIA_ROOT = os.getenv("MEDIA_ROOT", "media")
 FFMPEG = "ffmpeg"
 FFPROBE = "ffprobe"
-FFMPEG_TIMEOUT_SECONDS = None
+FFMPEG_TIMEOUT_SECONDS = settings.ffmpeg_timeout_seconds
 
 
 def _env_int(name: str, default: int) -> int:
@@ -179,17 +184,23 @@ def _run_with_resolved_exec(cmd, exec_name: str = "ffmpeg", env_var: str | None 
             "-loglevel", "error",
             "-nostdin",
             "-threads", str(FFMPEG_THREADS),
-            "-filter_threads", str(FFMPEG_THREADS),
-            "-filter_complex_threads", str(FFMPEG_THREADS),
+            "-filter_threads", str(settings.ffmpeg_filter_threads),
+            "-filter_complex_threads", str(settings.ffmpeg_filter_threads),
         ]
         env = dict(os.environ)
         env.setdefault("OMP_NUM_THREADS", str(FFMPEG_THREADS))
         env.setdefault("MKL_NUM_THREADS", str(FFMPEG_THREADS))
         kwargs.setdefault("env", env)
         kwargs.setdefault("timeout", FFMPEG_TIMEOUT_SECONDS)
+        # Decoder options apply to each input, rather than just the first one.
+        for index in reversed([i for i, value in enumerate(cmd) if value == "-i"]):
+            cmd[index:index] = ["-threads", str(FFMPEG_THREADS)]
     job_id = current_render_job_id.get()
     if job_id:
         logger.info("[render] job_id=%s running %s", job_id, exec_name)
+    if exec_name == "ffmpeg":
+        return run_ffmpeg(cmd, **kwargs)
+    kwargs.setdefault("timeout", min(settings.ffmpeg_timeout_seconds, 60))
     return subprocess.run(cmd, **kwargs)
 
 def parse_color(value, default=(255, 255, 255, 1.0)):
@@ -271,10 +282,23 @@ def download_font(font_url: str) -> str:
     font_path = os.path.join(FONT_CACHE_DIR, f"{url_hash}{ext}")
     if os.path.exists(font_path):
         return font_path
-    resp = requests.get(font_url, timeout=20)
-    resp.raise_for_status()
-    with open(font_path, "wb") as f:
-        f.write(resp.content)
+    temporary = None
+    try:
+        with requests.get(font_url, stream=True, timeout=(5, 20)) as response:
+            response.raise_for_status()
+            deadline = time.monotonic() + 30
+            with tempfile.NamedTemporaryFile(dir=FONT_CACHE_DIR, delete=False) as f:
+                temporary = f.name
+                total = 0
+                for chunk in response.iter_content(1024 * 1024):
+                    total += len(chunk)
+                    if total > 20 * 1024 * 1024 or time.monotonic() > deadline:
+                        raise ValueError("Font exceeds size or download time limit")
+                    f.write(chunk)
+        os.replace(temporary, font_path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.remove(temporary)
     return font_path
 
 def resolve_font_file(details: Dict[str, Any]) -> str:
@@ -665,9 +689,49 @@ def parse_scale(transform_str: str) -> float:
 def normalize_media_src(src: str) -> str:
     if not src:
         return ""
+    temp_dir = current_render_temp_dir.get()
     if isinstance(src, str) and src.startswith("http"):
-        return src
-    return abs_media_path(src)
+        if not temp_dir or os.getenv("REMOTE_ASSET_CACHE", "true").lower() != "true":
+            return src
+        ensure_dir(temp_dir)
+        suffix = os.path.splitext(urllib.parse.urlparse(src).path)[1].lower()
+        suffix = suffix if re.fullmatch(r"\.[a-z0-9]{1,8}", suffix) else ".bin"
+        target = os.path.join(temp_dir, "asset_" + hashlib.sha256(src.encode()).hexdigest() + suffix)
+        if not os.path.isfile(target):
+            temporary = None
+            try:
+                with requests.get(src, stream=True, timeout=(5, 20)) as response:
+                    response.raise_for_status()
+                    deadline = time.monotonic() + settings.ffmpeg_timeout_seconds
+                    with tempfile.NamedTemporaryFile(dir=temp_dir, delete=False) as handle:
+                        temporary = handle.name
+                        total = 0
+                        for chunk in response.iter_content(1024 * 1024):
+                            total += len(chunk)
+                            if total > settings.max_video_bytes:
+                                raise ValueError("Remote asset exceeds upload size limit")
+                            if time.monotonic() > deadline:
+                                raise ValueError("Remote asset download timed out")
+                            handle.write(chunk)
+                os.replace(temporary, target)
+            finally:
+                if temporary and os.path.isfile(temporary):
+                    os.remove(temporary)
+        path = target
+    else:
+        path = abs_media_path(src)
+    if os.path.splitext(path)[1].lower() == ".svg" and temp_dir:
+        from app.services.svg_raster import svg_to_png
+        target = os.path.join(temp_dir, "svg_" + hashlib.sha256(path.encode()).hexdigest() + ".png")
+        if not os.path.isfile(target):
+            with open(path, "rb") as handle:
+                data = handle.read(settings.max_image_bytes + 1)
+            if len(data) > settings.max_image_bytes:
+                raise ValueError("SVG exceeds image size limit")
+            with open(target, "wb") as handle:
+                handle.write(svg_to_png(data))
+        return target
+    return path
 
 def write_text_temp(text: str) -> str:
     temp_dir = current_render_temp_dir.get() or MEDIA_ROOT
@@ -1049,7 +1113,8 @@ def render_image_preview(template_json, customer, company, output_path):
     # -------------------------------------------------------
     cmd = ["ffmpeg", "-y"]
     for src in inputs:
-        cmd += ["-loop", "1", "-i", src]
+        # A single-frame image output needs each still decoded only once.
+        cmd += ["-i", src]
 
     output_path = str(output_path).replace("\\", "/")
 
@@ -1065,7 +1130,7 @@ def render_image_preview(template_json, customer, company, output_path):
         output_path,
     ]
 
-    logger.debug("Running FFmpeg image render")
+    logger.info("[IMAGE RENDER] job_id=%s size=%sx%s inputs=%s", current_render_job_id.get() or "-", canvas_w, canvas_h, len(inputs))
 
     _run_with_resolved_exec(cmd, exec_name="ffmpeg", env_var="FFMPEG_BIN", check=True)
     return " ".join(shlex.quote(c) for c in cmd)
@@ -1104,9 +1169,11 @@ def render_preview(template_json, context_data=None, output_path=None):
     track_items_map = design.get("trackItemsMap", {})
     tracks = design.get("tracks", [])
     duration = float(duration)
+    if not math.isfinite(duration) or duration > settings.max_output_video_seconds:
+        raise ValueError(f"Output duration may not exceed {settings.max_output_video_seconds} seconds")
 
     editor_w, editor_h = resolve_canvas_size(design)
-    render_scale = min(1.0, 1280 / editor_w, 720 / editor_h)
+    render_scale = min(1.0, settings.max_output_width / editor_w, settings.max_output_height / editor_h)
     if os.getenv("FFMPEG_COMPOSE_AT_OUTPUT_SIZE", "true").lower() != "true":
         render_scale = 1.0
     canvas_w = max(2, int(editor_w * render_scale / 2) * 2)
@@ -1395,11 +1462,11 @@ def render_preview(template_json, context_data=None, output_path=None):
     for a in audio_inputs:
         cmd += ["-i", a["src"]]
 
-    if canvas_w <= 1280 and canvas_h <= 720:
+    if canvas_w <= settings.max_output_width and canvas_h <= settings.max_output_height:
         filter_parts.append(f"{last_label}setsar=1[mobileout]")
     else:
         filter_parts.append(
-            f"{last_label}scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease,"
+            f"{last_label}scale='min({settings.max_output_width},iw)':'min({settings.max_output_height},ih)':force_original_aspect_ratio=decrease,"
             "scale='trunc(iw/2)*2':'trunc(ih/2)*2',setsar=1[mobileout]"
         )
     last_label = "[mobileout]"
@@ -1426,7 +1493,7 @@ def render_preview(template_json, context_data=None, output_path=None):
         output_path
     ]
 
-    logger.debug("Running FFmpeg video render with %s visual and %s audio inputs", len(visual_inputs), len(audio_inputs))
+    logger.info("[VIDEO RENDER] job_id=%s size=%sx%s duration=%ss fps=%s visual_inputs=%s audio_inputs=%s", current_render_job_id.get() or "-", canvas_w, canvas_h, duration, fps, len(visual_inputs), len(audio_inputs))
 
     _run_with_resolved_exec(cmd, exec_name="ffmpeg", env_var="FFMPEG_BIN", check=True)
     return " ".join(shlex.quote(c) for c in cmd)

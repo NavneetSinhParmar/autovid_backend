@@ -1,0 +1,21 @@
+[Unit]
+Description=AutoVid FastAPI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=autovid
+Group=autovid
+WorkingDirectory=/var/www/autovid_backend
+EnvironmentFile=/var/www/autovid_backend/.env
+EnvironmentFile=/var/www/autovid_backend/deploy/capacity.env
+ExecStart=/var/www/autovid_backend/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+UMask=0027
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

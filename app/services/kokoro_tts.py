@@ -1,4 +1,5 @@
 import subprocess
+from app.services.ffmpeg_process import run_ffmpeg
 import uuid
 import logging
 from functools import lru_cache
@@ -6,7 +7,6 @@ from io import BytesIO
 
 import numpy as np
 import soundfile as sf
-import torch
 
 from fastapi import UploadFile, HTTPException
 
@@ -14,14 +14,17 @@ from app.services.storage import save_upload_file
 
 logger = logging.getLogger(__name__)
 
-CUDA_AVAILABLE = torch.cuda.is_available()
 
+def cuda_available() -> bool:
+    import torch
+    return torch.cuda.is_available()
 
 @lru_cache(maxsize=1)
 def get_model():
+    import torch
     from kokoro import KModel
 
-    device = "cuda" if CUDA_AVAILABLE else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(f"Loading KModel on {device}…")
     model = KModel().to(device).eval()
     logger.info(f"KModel ready ✓ (device={device})")
@@ -40,6 +43,7 @@ def get_pipeline(lang_code: str):
 
 
 def synthesize_audio_numpy(voisetext: str, voice: str, speed: float) -> np.ndarray:
+    import torch
     if not voisetext or not str(voisetext).strip():
         raise HTTPException(400, "Text cannot be empty")
 
@@ -75,7 +79,7 @@ def try_convert_wav_to_mp3(wav_bytes: bytes) -> tuple[bytes, str]:
     Returns (bytes, ext) where ext is 'mp3' or 'wav' (fallback).
     """
     try:
-        proc = subprocess.run(
+        proc = run_ffmpeg(
             [
                 "ffmpeg",
                 "-y",

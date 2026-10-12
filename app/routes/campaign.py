@@ -1,6 +1,7 @@
 import json
 import csv
 import io
+import asyncio
 import re
 from datetime import datetime
 from pathlib import Path
@@ -36,7 +37,7 @@ async def _create_campaign(name: str, template_id: str, company_id: str, source:
     }
     result = await db.campaigns.insert_one(document)
     campaign_id = str(result.inserted_id)
-    celery_app.send_task("app.worker.video_worker.expand_campaign_task", args=[campaign_id], queue="campaigns")
+    await asyncio.to_thread(celery_app.send_task, "app.worker.video_worker.expand_campaign_task", args=[campaign_id], queue="campaigns")
     return {"campaign_id": campaign_id, "status": "QUEUED"}
 
 

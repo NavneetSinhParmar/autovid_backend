@@ -6,7 +6,8 @@ RUN apt-get update && \
     fontconfig \
     fonts-dejavu-core \
     libfreetype6 \
-    libfontconfig1 && \
+    libfontconfig1 \
+    libcairo2 && \
     rm -rf /var/lib/apt/lists/*
 
 COPY app/Fonts /usr/share/fonts/truetype/custom

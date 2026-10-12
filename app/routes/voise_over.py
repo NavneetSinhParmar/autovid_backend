@@ -10,7 +10,7 @@ from app.utils.auth import require_roles
 from app.db.connection import db
 from datetime import datetime
 from app.services.kokoro_tts import (
-    CUDA_AVAILABLE,
+    cuda_available,
     get_model,
     get_pipeline,
     synthesize_and_store_media,
@@ -23,7 +23,7 @@ from app.core.tenancy import company_id_for_user
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/kokoro", tags=["kokoro-tts"])
-logger.info(f"Kokoro: CUDA available: {CUDA_AVAILABLE}")
+logger.info("Kokoro: device detection deferred until requested")
 
 # Voice catalogue (kept identical to official app choices)
 VOICES = [
@@ -132,7 +132,8 @@ async def tts_to_media(
 
 @router.get("/health")
 def health():
-    return {"status": "ok", "cuda": CUDA_AVAILABLE, "device": "cuda" if CUDA_AVAILABLE else "cpu"}
+    available = cuda_available()
+    return {"status": "ok", "cuda": available, "device": "cuda" if available else "cpu"}
 
 async def warmup():
     """Pre-load model + both pipelines so the first request isn't slow."""

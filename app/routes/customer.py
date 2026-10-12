@@ -28,8 +28,8 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/customer", tags=["Customer Management"])
 logger = logging.getLogger(__name__)
 
-CUSTOMER_LOGO_EXTENSIONS = (".png", ".jpg", ".jpeg")
-CUSTOMER_LOGO_EXTENSION_PRIORITY = {".png": 0, ".jpeg": 1, ".jpg": 2}
+CUSTOMER_LOGO_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".svg")
+CUSTOMER_LOGO_EXTENSION_PRIORITY = {".png": 0, ".jpeg": 1, ".jpg": 2, ".webp": 3, ".svg": 4}
 CUSTOMER_LOGO_FORM_FIELDS = {
     "logo_files",
     "logo_files[]",
@@ -137,15 +137,15 @@ async def generate_distributed_id() -> str:
     raise HTTPException(status_code=500, detail="Unable to generate distributed_id")
 
 def validate_image_file(file: UploadFile):
-    allowed_extensions = (".png", ".jpg", ".jpeg")
-    allowed_types = ["image/png", "image/jpeg", "image/jpg"]
+    allowed_extensions = CUSTOMER_LOGO_EXTENSIONS
+    allowed_types = ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/svg+xml"]
 
     filename = file.filename.lower()
 
     if not filename.endswith(allowed_extensions):
         raise HTTPException(
             status_code=400,
-            detail=f"{file.filename} must be PNG or JPG/JPEG format"
+            detail=f"{file.filename} must be PNG, JPG/JPEG, WebP or SVG format"
         )
 
     if file.content_type not in allowed_types:

@@ -1,0 +1,28 @@
+{
+  "threads": 2,
+  "total_seconds": 13.275,
+  "renders": [
+    {
+      "index": 1,
+      "seconds": 13.152,
+      "media": {
+        "duration": 14.8,
+        "width": 1280,
+        "height": 720,
+        "video_codec": "h264",
+        "audio_codec": "aac"
+      }
+    },
+    {
+      "index": 2,
+      "seconds": 13.209,
+      "media": {
+        "duration": 14.8,
+        "width": 1280,
+        "height": 720,
+        "video_codec": "h264",
+        "audio_codec": "aac"
+      }
+    }
+  ]
+}
