@@ -1251,7 +1251,7 @@ def render_preview(template_json, context_data=None, output_path=None):
     # 2️⃣ BASE CANVAS
     # -------------------------------------------------
     filter_parts.append(
-        f"color=c=black:s={canvas_w}x{canvas_h}:d={duration}[base]"
+        f"color=c=black:s={canvas_w}x{canvas_h}:r={fps}:d={duration}[base]"
     )
     last_label = "[base]"
 
@@ -1306,9 +1306,12 @@ def render_preview(template_json, context_data=None, output_path=None):
         style_chain = build_visual_effect_filters_after_scale(details)
         media_type = "image" if is_image_input else "video"
         visual_filter = build_visual_fit_filter(box_w, box_h, details, style_chain, media_type)
+        # Drop frames before expensive scaling/effects. Still images must remain
+        # a single frame so overlay can repeat them throughout their interval.
+        frame_rate_filter = "" if is_image_input else f"fps={fps},"
 
         filter_parts.append(
-            f"[{idx}:v]{visual_filter},setpts=PTS-STARTPTS+{start}/TB[{sc}]"
+            f"[{idx}:v]{frame_rate_filter}{visual_filter},setpts=PTS-STARTPTS+{start}/TB[{sc}]"
         )
         filter_parts.append(
             f"{last_label}[{sc}]overlay={x_expr}:{y_expr}:enable='between(t,{start},{end})'[{ov}]"
@@ -1495,7 +1498,9 @@ def render_preview(template_json, context_data=None, output_path=None):
 
     logger.info("[VIDEO RENDER] job_id=%s size=%sx%s duration=%ss fps=%s visual_inputs=%s audio_inputs=%s", current_render_job_id.get() or "-", canvas_w, canvas_h, duration, fps, len(visual_inputs), len(audio_inputs))
 
+    render_started = time.monotonic()
     _run_with_resolved_exec(cmd, exec_name="ffmpeg", env_var="FFMPEG_BIN", check=True)
+    logger.info("[VIDEO RENDER COMPLETE] job_id=%s render_seconds=%.3f", current_render_job_id.get() or "-", time.monotonic() - render_started)
     return " ".join(shlex.quote(c) for c in cmd)
 
 def render_video(task_id: str):

@@ -22,6 +22,45 @@ class VideoPipelineTests(unittest.TestCase):
         config.start()
         self.addCleanup(config.stop)
 
+    def test_high_fps_video_keeps_timeline_audio_and_output_frame_rate(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / "source.mp4"
+            output = Path(root) / "output.mp4"
+            subprocess.run([
+                "ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+                "color=c=red:s=64x36:r=60:d=1", "-f", "lavfi", "-i",
+                "sine=frequency=440:duration=1", "-c:v", "libx264",
+                "-pix_fmt", "yuv420p", "-c:a", "aac", str(source),
+            ], check=True)
+            template = {"duration": 2, "template_json": {"design": {
+                "size": {"width": 64, "height": 36}, "fps": 15,
+                "trackItemIds": ["video"], "trackItemsMap": {"video": {
+                    "type": "video", "details": {
+                        "src": str(source), "width": 64, "height": 36,
+                    }, "display": {"from": 500, "to": 1500},
+                }},
+            }}}
+            with patch("app.services.video_renderer.normalize_media_src", side_effect=lambda value: value):
+                render_preview(template, {}, str(output))
+            metadata = validate_generated_video(str(output))
+            self.assertAlmostEqual(metadata["duration"], 2, places=1)
+            self.assertEqual(metadata["audio_codec"], "aac")
+            probe = subprocess.run([
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=avg_frame_rate,nb_frames", "-of", "json", str(output),
+            ], capture_output=True, text=True, check=True)
+            stream = json.loads(probe.stdout)["streams"][0]
+            self.assertEqual(stream["avg_frame_rate"], "15/1")
+            self.assertEqual(int(stream["nb_frames"]), 30)
+            for timestamp, red in [(0.2, False), (0.8, True), (1.8, False)]:
+                frame = subprocess.run([
+                    "ffmpeg", "-v", "error", "-ss", str(timestamp), "-i", str(output),
+                    "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
+                ], capture_output=True, check=True).stdout
+                pixel = frame[(18 * 64 + 32) * 3: (18 * 64 + 32) * 3 + 3]
+                self.assertEqual(pixel[0] > 180 and pixel[1] < 40, red)
+
     def test_simultaneous_image_and_video_have_separate_outputs(self):
         from unittest.mock import patch
         from app.services.video_renderer import render_image_preview
