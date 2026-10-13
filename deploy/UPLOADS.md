@@ -40,3 +40,23 @@ target the public backend origin, not `/api/backend/...` on Netlify. Test valid
 image, video and music files below and at 60 MB, and confirm files above 60 MB
 are rejected. An OPTIONS request should allow the Netlify origin and Authorization
 header. If OPTIONS fails, check CORS and that Nginx forwards it to the API.
+
+For the public template upload, verify the deployed preflight directly:
+
+```bash
+curl -i -X OPTIONS \
+  'https://api.triaangle.co.in/public/templates/6acb9b7ccf6eaa3fb466d1cf/media' \
+  -H 'Origin: https://super-lolly-559e09.netlify.app' \
+  -H 'Access-Control-Request-Method: POST' \
+  -H 'Access-Control-Request-Headers: authorization,content-type'
+```
+
+Expect HTTP 200 and
+`Access-Control-Allow-Origin: https://super-lolly-559e09.netlify.app`.
+`CORS_ORIGINS` in the running process overrides `.env.local`, which overrides
+`.env`; any of these values overrides the defaults in `app/core/settings.py`.
+Use the exact origin with no trailing slash, and restart all API processes after
+changing it. A 400 response containing `Disallowed CORS origin` indicates the
+active allowlist is missing this origin. A redirect, proxy error, or response
+without CORS headers should also be checked at the proxy: forward OPTIONS to
+FastAPI without authentication or redirects.
