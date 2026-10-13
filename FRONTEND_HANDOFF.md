@@ -42,6 +42,7 @@ This is a source-level contract review, not a live integration certification. Th
 | Media library | `GET /media-api` | Paginated `items`; superadmin supplies `company_id`. |
 | General upload | `POST /media-api/upload` | Multipart `file`; superadmin supplies `company_id`. Response `{media: ...}`. |
 | Template upload | `POST /api/public/media/templates` | Multipart `file`, `template_id`, optional privileged `company_id`. Despite its name, requires authenticated ownership. |
+| Public render upload | `POST /public/templates/{id}/media` | Anonymous multipart `file`; requires an active public template. Returns `{media: {file_url: "./media/..."}}`; does not modify the saved template. |
 | Public template list | `GET /api/public/templates` | Published active templates; pagination only. |
 | Public template detail | `GET /api/public/template/{id}` | Response `{template: ...}`. |
 | Template preview | `POST /templates/{id}/preview` | No body required; returns 202 and job details. |
@@ -110,6 +111,7 @@ Backend defaults (deployment configuration can override these):
 
 - SVG is rejected. Do not advertise it as supported.
 - No upload-constraints endpoint exists yet. Keep UI limits in one deployment configuration shared with backend settings; backend validation remains authoritative.
+- Public personalization must not depend on the session-protected Next.js `/api/uploads/config` or private upload proxy. An anonymous request there can return `UNAUTHENTICATED` before any image reaches this backend. Use a dedicated public proxy to `POST /public/templates/{id}/media`, forwarding multipart `file` with its boundary, and use deployment-configured limits for the public UI. Keep authentication on private media-library uploads. Pass the returned media reference in the public render `fields`, then submit `/public/templates/{id}/preview` or `/download` and poll the returned job using its capability `access_token`.
 - Use `VIDEO_TOO_LONG`, not only the older task.md name `VIDEO_DURATION_EXCEEDED`. Also handle FILE_TOO_LARGE, INVALID_MEDIA_TYPE, INVALID_IMAGE, INVALID_VIDEO, UNSUPPORTED_FORMAT and IMAGE_DIMENSIONS_EXCEEDED.
 - Distinguish source duration from generated timeline duration. A five-minute source does not permit a five-minute personalized output; trim/use a timeline <=60 seconds.
 - Browser preview support can differ from backend codec support. A browser metadata/preview failure must not be presented as definitive server corruption.
